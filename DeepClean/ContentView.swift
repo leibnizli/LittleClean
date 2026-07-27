@@ -13,6 +13,17 @@ struct CategoryItem: Identifiable {
     var isSelected: Bool = true
 }
 
+private enum SelectionState {
+    case checked, unchecked, mixed
+    var symbolName: String {
+        switch self {
+        case .checked: return "checkmark.square.fill"
+        case .unchecked: return "square"
+        case .mixed: return "minus.square.fill"
+        }
+    }
+}
+
 struct ContentView: View {
     // Disk Space State
     @State private var totalBytes: Int64 = 0
@@ -25,6 +36,9 @@ struct ContentView: View {
     // Outline table column sort order (click headers to sort)
     @State private var sortOrder: [KeyPathComparator<CategoryItem>] = []
 
+    // Checkbox multi-selection of cleanable items
+    @State private var selectedIDs: Set<UUID> = []
+
     var usedPercentage: Int {
         guard totalBytes > 0 else { return 0 }
         return Int(Double(usedBytes) / Double(totalBytes) * 100)
@@ -32,13 +46,18 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // MARK: - Top Status Bar: Disk Usage Data
+            topStatusBar
+
+            Divider()
+
             // MARK: - Main Content: Cleanable Directory Outline Table
             cleanListView
 
             Divider()
 
-            // MARK: - Bottom Status Bar: Disk Usage Data
-            bottomStatusBar
+            // MARK: - Bottom Action Bar: Selection + Clean
+            bottomActionBar
         }
         .frame(minWidth: 720, minHeight: 460)
         .onAppear {
@@ -50,7 +69,18 @@ struct ContentView: View {
     private var cleanListView: some View {
         Table(sortedCategories, children: \.children, sortOrder: $sortOrder) {
             TableColumn("Path", value: \.pathDescription) { item in
-                HStack(alignment: .center, spacing: 4) {
+                HStack(alignment: .center, spacing: 6) {
+                    let state = selectionState(for: item)
+                    let enabled = isCleanable(item)
+                    Button {
+                        toggleSelection(item)
+                    } label: {
+                        Image(systemName: state.symbolName)
+                            .foregroundColor(enabled ? Color(NSColor.controlAccentColor) : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!enabled)
+
                     Text(item.pathDescription)
                         .font(.system(size: 13))
                     if let note = item.rule.note {
@@ -69,28 +99,15 @@ struct ContentView: View {
             .width(min: 90, ideal: 110, max: 150)
 
             TableColumn("") { item in
-                HStack(spacing: 6) {
-                    Button {
-                        openInFinder(pathDescription: item.pathDescription)
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-
-                    if case .none = item.rule.cleanType {
-                        EmptyView()
-                    } else {
-                        Button("Clean") {
-                            performClean(item: item)
-                        }
-                        .disabled(isScanning)
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    }
+                Button {
+                    openInFinder(pathDescription: item.pathDescription)
+                } label: {
+                    Image(systemName: "magnifyingglass")
                 }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
             }
-            .width(min: 110, ideal: 130, max: 170)
+            .width(min: 40, ideal: 50, max: 60)
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -106,8 +123,8 @@ struct ContentView: View {
         return result
     }
 
-    // MARK: - Bottom Status Bar
-    private var bottomStatusBar: some View {
+    // MARK: - Top Status Bar
+    private var topStatusBar: some View {
         HStack(spacing: 14) {
             HStack(spacing: 8) {
                 GeometryReader { geometry in
@@ -125,16 +142,16 @@ struct ContentView: View {
 
             Divider().frame(height: 14)
 
+            Label("Total \(formatBytes(totalBytes))", systemImage: "internaldrive")
+                .foregroundColor(.secondary)
+                .font(.system(size: 12))
+
             Label("Used \(formatBytes(usedBytes))", systemImage: "circle.fill")
                 .foregroundColor(.gray)
                 .font(.system(size: 12))
 
             Label("Free \(formatBytes(freeBytes))", systemImage: "circle.fill")
                 .foregroundColor(.green)
-                .font(.system(size: 12))
-
-            Label("Total \(formatBytes(totalBytes))", systemImage: "internaldrive")
-                .foregroundColor(.secondary)
                 .font(.system(size: 12))
 
             Spacer()
@@ -146,6 +163,28 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    // MARK: - Bottom Action Bar: Selection + Clean
+    private var bottomActionBar: some View {
+        HStack(spacing: 14) {
+            Text("\(selectedIDs.count) selected")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+
+            Spacer()
+
+            Button {
+                performCleanSelected()
+            } label: {
+                Text("Clean")
+            }
+            .disabled(selectedIDs.isEmpty || isScanning)
+            .buttonStyle(.borderedProminent)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
@@ -168,6 +207,9 @@ struct ContentView: View {
                 if rule.isDynamicSimulatorRule {
                     let simItems = self.scanSimulatorVersions(basePath: rule.pathDescription)
                     foundCategories.append(contentsOf: simItems)
+                } else if rule.isDynamicUnavailableSimulatorRule {
+                    let unavailItems = self.scanUnavailableSimulators(basePath: rule.pathDescription)
+                    foundCategories.append(contentsOf: unavailItems)
                 } else if rule.isDynamicLeftoversRule {
                     let leftoverItems = self.scanAppLeftovers(basePath: rule.pathDescription)
                     foundCategories.append(contentsOf: leftoverItems)
@@ -196,6 +238,7 @@ struct ContentView: View {
 
             DispatchQueue.main.async {
                 self.categories = foundCategories
+                self.selectedIDs = []
                 self.isScanning = false
             }
         }
@@ -280,6 +323,107 @@ struct ContentView: View {
             return "\(parts[0]) \(parts[1])"
         }
         return last
+    }
+
+    // Detect simulator devices whose runtime is no longer installed (unavailable)
+    private func scanUnavailableSimulators(basePath: String) -> [CategoryItem] {
+        // Availability is not stored in device.plist; ask simctl via JSON output.
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["simctl", "list", "devices", "-j"]
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = Pipe()
+        do {
+            try process.run()
+        } catch {
+            return [] // Xcode / simctl not installed on this machine
+        }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let data = try? stdout.fileHandleForReading.readToEnd(),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let devicesByRuntime = json["devices"] as? [String: [Any]] else {
+            return []
+        }
+
+        let devicesBasePath = NSString(string: basePath).expandingTildeInPath
+        let fileManager = FileManager.default
+
+        var childItems: [CategoryItem] = []
+        var totalBytes: Int64 = 0
+
+        for (runtime, devices) in devicesByRuntime {
+            guard let deviceList = devices as? [[String: Any]] else { continue }
+            for device in deviceList {
+                // isAvailable may be Bool / String / absent across simctl versions
+                let isAvailable: Bool
+                if let b = device["isAvailable"] as? Bool {
+                    isAvailable = b
+                } else if let s = device["isAvailable"] as? String {
+                    isAvailable = (s == "1" || s.lowercased() == "true" || s.lowercased() == "yes")
+                } else {
+                    isAvailable = true
+                }
+                guard !isAvailable else { continue }
+                guard let udid = device["udid"] as? String else { continue }
+
+                let devicePath = (devicesBasePath as NSString).appendingPathComponent(udid)
+                var isDir: ObjCBool = false
+                guard fileManager.fileExists(atPath: devicePath, isDirectory: &isDir), isDir.boolValue else { continue }
+
+                let bytes = calculateDirectorySize(at: devicePath, isDirectory: true)
+                guard bytes > 1_000_000 else { continue } // skip trivial device folders
+
+                totalBytes += bytes
+                let deviceName = (device["name"] as? String) ?? udid
+                let runtimeName = parseRuntimeName(runtime)
+                let displayPath = "\(basePath)/\(udid)"
+
+                let rule = CleanRule(
+                    name: deviceName,
+                    pathDescription: displayPath,
+                    iconName: "iphone.slash",
+                    iconColor: .red,
+                    cleanType: .runCommand(executable: "/usr/bin/xcrun", args: ["simctl", "delete", udid]),
+                    note: "\(deviceName) - \(runtimeName)"
+                )
+                let item = CategoryItem(
+                    name: deviceName,
+                    pathDescription: displayPath,
+                    iconName: "iphone.slash",
+                    iconColor: .red,
+                    sizeBytes: bytes,
+                    sizeString: formatBytes(bytes),
+                    rule: rule
+                )
+                childItems.append(item)
+            }
+        }
+
+        guard !childItems.isEmpty else { return [] }
+
+        childItems.sort { $0.sizeBytes > $1.sizeBytes }
+
+        let parentRule = CleanRule(
+            name: "Unavailable Simulators",
+            pathDescription: basePath,
+            iconName: "iphone.slash",
+            iconColor: .red,
+            cleanType: .none,
+            note: "Simulator devices whose runtime is no longer installed"
+        )
+        let parent = CategoryItem(
+            name: parentRule.name,
+            pathDescription: parentRule.pathDescription,
+            iconName: parentRule.iconName,
+            iconColor: parentRule.iconColor,
+            sizeBytes: totalBytes,
+            sizeString: formatBytes(totalBytes),
+            rule: parentRule,
+            children: childItems
+        )
+        return [parent]
     }
 
     // Fetch all currently installed application names and bundle identifiers across system application directories
@@ -695,40 +839,113 @@ struct ContentView: View {
         return [parent]
     }
 
-    // Clean specified category
-    private func performClean(item: CategoryItem) {
+    // Core deletion for a single item (runs on a background thread)
+    private func cleanItem(_ item: CategoryItem) {
+        switch item.rule.cleanType {
+        case .none:
+            break
+        case .deleteDirectory:
+            let expandedPath = NSString(string: item.pathDescription).expandingTildeInPath
+            let fileManager = FileManager.default
+            if let contents = try? fileManager.contentsOfDirectory(atPath: expandedPath) {
+                for file in contents {
+                    let fullPath = (expandedPath as NSString).appendingPathComponent(file)
+                    try? fileManager.removeItem(atPath: fullPath)
+                }
+            }
+        case .deleteDirectoryTree:
+            let treePath = NSString(string: item.pathDescription).expandingTildeInPath
+            try? FileManager.default.removeItem(atPath: treePath)
+        case .deletePaths(let paths):
+            let fileManager = FileManager.default
+            for path in paths {
+                try? fileManager.removeItem(atPath: path)
+            }
+        case .runCommand(let executable, let args):
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = args
+            try? process.run()
+            process.waitUntilExit()
+        }
+    }
+
+    // Collect selected cleanable leaf items (parents are group headers, not cleaned directly)
+    private func collectCleanableSelected(from items: [CategoryItem]) -> [CategoryItem] {
+        var result: [CategoryItem] = []
+        for item in items {
+            if let children = item.children, !children.isEmpty {
+                result.append(contentsOf: collectCleanableSelected(from: children))
+            } else if item.rule.cleanType != .none && selectedIDs.contains(item.id) {
+                result.append(item)
+            }
+        }
+        return result
+    }
+
+    // Clean every selected cleanable item, then rescan
+    private func performCleanSelected() {
+        let toClean = collectCleanableSelected(from: categories)
+        guard !toClean.isEmpty else { return }
         isScanning = true
         DispatchQueue.global(qos: .userInitiated).async {
-            switch item.rule.cleanType {
-            case .none:
-                break
-            case .deleteDirectory:
-                let expandedPath = NSString(string: item.pathDescription).expandingTildeInPath
-                let fileManager = FileManager.default
-                if let contents = try? fileManager.contentsOfDirectory(atPath: expandedPath) {
-                    for file in contents {
-                        let fullPath = (expandedPath as NSString).appendingPathComponent(file)
-                        try? fileManager.removeItem(atPath: fullPath)
-                    }
-                }
-            case .deleteDirectoryTree:
-                let treePath = NSString(string: item.pathDescription).expandingTildeInPath
-                try? FileManager.default.removeItem(atPath: treePath)
-            case .deletePaths(let paths):
-                let fileManager = FileManager.default
-                for path in paths {
-                    try? fileManager.removeItem(atPath: path)
-                }
-            case .runCommand(let executable, let args):
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: executable)
-                process.arguments = args
-                try? process.run()
-                process.waitUntilExit()
+            for item in toClean {
+                self.cleanItem(item)
             }
-
             DispatchQueue.main.async {
                 self.performScan()
+            }
+        }
+    }
+
+    // MARK: - Selection Helpers
+    private func leafIDs(_ item: CategoryItem) -> Set<UUID> {
+        var ids = Set<UUID>()
+        if let children = item.children, !children.isEmpty {
+            for child in children {
+                ids.formUnion(leafIDs(child))
+            }
+        } else {
+            ids.insert(item.id)
+        }
+        return ids
+    }
+
+    private func isCleanable(_ item: CategoryItem) -> Bool {
+        if item.rule.cleanType != .none { return true }
+        if let children = item.children {
+            return children.contains { isCleanable($0) }
+        }
+        return false
+    }
+
+    private func selectionState(for item: CategoryItem) -> SelectionState {
+        if let children = item.children, !children.isEmpty {
+            let leaves = leafIDs(item)
+            guard !leaves.isEmpty else { return .unchecked }
+            let selected = leaves.intersection(selectedIDs).count
+            if selected == 0 { return .unchecked }
+            if selected == leaves.count { return .checked }
+            return .mixed
+        } else {
+            return selectedIDs.contains(item.id) ? .checked : .unchecked
+        }
+    }
+
+    private func toggleSelection(_ item: CategoryItem) {
+        if let children = item.children, !children.isEmpty {
+            let leaves = leafIDs(item)
+            if leaves.isSubset(of: selectedIDs) {
+                selectedIDs.subtract(leaves)
+            } else {
+                selectedIDs.formUnion(leaves)
+            }
+        } else {
+            guard item.rule.cleanType != .none else { return }
+            if selectedIDs.contains(item.id) {
+                selectedIDs.remove(item.id)
+            } else {
+                selectedIDs.insert(item.id)
             }
         }
     }

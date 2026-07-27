@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum CleanType {
+enum CleanType: Equatable {
     case none
     case deleteDirectory        // clear contents, keep the folder (caches)
     case deleteDirectoryTree    // remove the folder entirely (leftovers)
@@ -20,6 +20,7 @@ struct CleanRule: Identifiable {
     var isDynamicLeftoversRule: Bool = false
     var isDynamicHomeCacheRule: Bool = false
     var isDynamicHomeLeftoversRule: Bool = false
+    var isDynamicUnavailableSimulatorRule: Bool = false
 }
 
 struct CleanConfig {
@@ -36,6 +37,13 @@ struct CleanConfig {
             iconName: "iphone.badge.play",
             iconColor: .purple,
             isDynamicSimulatorRule: true
+        ),
+        CleanRule(
+            name: "Unavailable Simulators",
+            pathDescription: "~/Library/Developer/CoreSimulator/Devices",
+            iconName: "iphone.slash",
+            iconColor: .red,
+            isDynamicUnavailableSimulatorRule: true
         ),
         CleanRule(
             name: "Uninstalled App Leftovers",
