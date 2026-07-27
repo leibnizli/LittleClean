@@ -2,7 +2,8 @@ import SwiftUI
 
 enum CleanType {
     case none
-    case deleteDirectory
+    case deleteDirectory        // clear contents, keep the folder (caches)
+    case deleteDirectoryTree    // remove the folder entirely (leftovers)
     case deletePaths([String])
     case runCommand(executable: String, args: [String])
 }
@@ -17,6 +18,8 @@ struct CleanRule: Identifiable {
     var note: String? = nil
     var isDynamicSimulatorRule: Bool = false
     var isDynamicLeftoversRule: Bool = false
+    var isDynamicHomeCacheRule: Bool = false
+    var isDynamicHomeLeftoversRule: Bool = false
 }
 
 struct CleanConfig {
@@ -41,6 +44,20 @@ struct CleanConfig {
             iconColor: .pink,
             isDynamicLeftoversRule: true
         ),
-        CleanRule(name: "Saved App State", pathDescription: "~/Library/Saved Application State", iconName: "clock.arrow.circlepath", iconColor: .mint)
+        CleanRule(name: "Saved App State", pathDescription: "~/Library/Saved Application State", iconName: "clock.arrow.circlepath", iconColor: .mint),
+        CleanRule(
+            name: "Home Tool Caches",
+            pathDescription: "~",
+            iconName: "shippingbox.fill",
+            iconColor: .orange,
+            isDynamicHomeCacheRule: true
+        ),
+        CleanRule(
+            name: "Home Directory Leftovers",
+            pathDescription: "~",
+            iconName: "folder.badge.minus",
+            iconColor: .pink,
+            isDynamicHomeLeftoversRule: true
+        )
     ]
 }

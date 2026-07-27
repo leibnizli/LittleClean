@@ -171,6 +171,12 @@ struct ContentView: View {
                 } else if rule.isDynamicLeftoversRule {
                     let leftoverItems = self.scanAppLeftovers(basePath: rule.pathDescription)
                     foundCategories.append(contentsOf: leftoverItems)
+                } else if rule.isDynamicHomeCacheRule {
+                    let cacheItems = self.scanHomeCaches(basePath: rule.pathDescription)
+                    foundCategories.append(contentsOf: cacheItems)
+                } else if rule.isDynamicHomeLeftoversRule {
+                    let homeItems = self.scanHomeLeftovers(basePath: rule.pathDescription)
+                    foundCategories.append(contentsOf: homeItems)
                 } else if fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) {
                     let totalBytes = calculateDirectorySize(at: expandedPath, isDirectory: isDirectory.boolValue)
                     let sizeStr = formatBytes(totalBytes)
@@ -464,7 +470,7 @@ struct ContentView: View {
                         pathDescription: displayPath,
                         iconName: "folder.badge.minus",
                         iconColor: .pink,
-                        cleanType: .deleteDirectory
+                        cleanType: .deleteDirectoryTree
                     )
 
                     let childItem = CategoryItem(
@@ -490,7 +496,7 @@ struct ContentView: View {
             pathDescription: basePath,
             iconName: "folder.badge.minus",
             iconColor: .pink,
-            cleanType: .deleteDirectory,
+            cleanType: .none,
             note: "Uninstalled Application Data"
         )
 
@@ -506,6 +512,187 @@ struct ContentView: View {
         )
 
         return [parentItem]
+    }
+
+    // Scan known tool cache locations under the home directory
+    private func scanHomeCaches(basePath: String) -> [CategoryItem] {
+        let home = NSHomeDirectory()
+        let fileManager = FileManager.default
+
+        // Curated, safe-to-clear tool caches (contents only; folder is kept)
+        let knownCaches: [(name: String, subpath: String, icon: String, color: Color)] = [
+            ("XDG Cache", ".cache", "shippingbox.fill", .orange),
+            ("Gradle Cache", ".gradle/caches", "hammer.fill", .purple),
+            ("npm Cache", ".npm/_cacache", "shippingbox.fill", .red),
+            ("npx Cache", ".npm/_npx", "shippingbox.fill", .red),
+            ("pnpm Store", ".pnpm-store", "shippingbox.fill", .teal),
+            ("pnpm Store (macOS)", "Library/pnpm", "shippingbox.fill", .teal),
+            ("Yarn Cache", ".yarn/cache", "shippingbox.fill", .blue),
+            ("Yarn Berry Cache", ".yarn/berry/cache", "shippingbox.fill", .cyan),
+            ("Bun Cache", ".bun/install/cache", "shippingbox.fill", .pink),
+            ("node-gyp Cache", ".node-gyp", "hammer.fill", .gray),
+            ("Deno Cache", ".deno/deps", "shippingbox.fill", .green),
+            ("Maven Repository", ".m2/repository", "shippingbox.fill", .indigo),
+            ("Cargo Registry Cache", ".cargo/registry", "shippingbox.fill", .orange)
+        ]
+
+        var childItems: [CategoryItem] = []
+        var totalBytes: Int64 = 0
+
+        for cache in knownCaches {
+            let fullPath = (home as NSString).appendingPathComponent(cache.subpath)
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue else { continue }
+
+            let bytes = calculateDirectorySize(at: fullPath, isDirectory: true)
+            guard bytes > 1_000_000 else { continue } // skip trivial caches
+
+            totalBytes += bytes
+            let displayPath = "~/\(cache.subpath)"
+            let rule = CleanRule(
+                name: cache.name,
+                pathDescription: displayPath,
+                iconName: cache.icon,
+                iconColor: cache.color,
+                cleanType: .deleteDirectory
+            )
+            let item = CategoryItem(
+                name: cache.name,
+                pathDescription: displayPath,
+                iconName: cache.icon,
+                iconColor: cache.color,
+                sizeBytes: bytes,
+                sizeString: formatBytes(bytes),
+                rule: rule
+            )
+            childItems.append(item)
+        }
+
+        guard !childItems.isEmpty else { return [] }
+
+        let parentRule = CleanRule(
+            name: "Home Tool Caches",
+            pathDescription: basePath,
+            iconName: "shippingbox.fill",
+            iconColor: .orange,
+            cleanType: .none,
+            note: "Tool cache - safe to clear, will be re-downloaded"
+        )
+        let parent = CategoryItem(
+            name: parentRule.name,
+            pathDescription: parentRule.pathDescription,
+            iconName: parentRule.iconName,
+            iconColor: parentRule.iconColor,
+            sizeBytes: totalBytes,
+            sizeString: formatBytes(totalBytes),
+            rule: parentRule,
+            children: childItems
+        )
+        return [parent]
+    }
+
+    // Scan the home directory for dotfolders left behind by uninstalled apps/tools
+    private func scanHomeLeftovers(basePath: String) -> [CategoryItem] {
+        let home = NSHomeDirectory()
+        let fileManager = FileManager.default
+        guard let entries = try? fileManager.contentsOfDirectory(atPath: home) else { return [] }
+
+        let installedApps = fetchInstalledAppIdentifiers()
+
+        // Standard macOS user folders (non-dot, but skip defensively)
+        let standardUserFolders: Set<String> = [
+            "desktop", "documents", "downloads", "library", "movies", "music",
+            "pictures", "public", "applications", "sites"
+        ]
+
+        // Shared / system / tool dirs handled elsewhere - never delete wholesale
+        let sharedAndSystem: Set<String> = [
+            ".config", ".cache", ".local", ".ssh", ".gnupg", ".aws", ".kube",
+            ".docker", ".android", ".gradle", ".m2", ".ivy2", ".cargo", ".rustup",
+            ".npm", ".pnpm-store", ".yarn", ".gem", ".cocoapods",
+            ".bun", ".deno", ".node-gyp",
+            ".ds_store", ".localized", ".cfusertextencoding", ".fseventsd",
+            ".spotlight-v100", ".documentrevisions-v100", ".pkinstallsandboxmanager",
+            ".vol", ".file", ".hotfiles.btree", ".trash", ".temporaryitems"
+        ]
+
+        var childItems: [CategoryItem] = []
+        var totalBytes: Int64 = 0
+
+        for entry in entries {
+            // App/tool leftovers in ~ are dot-prefixed; skip regular user folders
+            guard entry.hasPrefix(".") else { continue }
+
+            let fullPath = (home as NSString).appendingPathComponent(entry)
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue else { continue }
+
+            let lower = entry.lowercased()
+            let normalized = normalizeString(entry)
+
+            if standardUserFolders.contains(lower) { continue }
+            if sharedAndSystem.contains(lower) { continue }
+            if isBinaryInPATH(entry) || isBinaryInPATH(lower) || isBinaryInPATH(normalized) { continue }
+
+            // Skip folders belonging to a currently installed application
+            let isInstalled = installedApps.contains { appKey in
+                guard !appKey.isEmpty else { return false }
+                let nApp = normalizeString(appKey)
+                if lower == appKey || normalized == nApp { return true }
+                if normalized.count >= 4 && nApp.count >= 4 {
+                    if normalized.contains(nApp) || nApp.contains(normalized) { return true }
+                }
+                return false
+            }
+            if isInstalled { continue }
+
+            let bytes = calculateDirectorySize(at: fullPath, isDirectory: true)
+            guard bytes > 1_000_000 else { continue } // skip trivial folders
+
+            totalBytes += bytes
+            let displayPath = "~/\(entry)"
+            let rule = CleanRule(
+                name: entry,
+                pathDescription: displayPath,
+                iconName: "folder.badge.minus",
+                iconColor: .pink,
+                cleanType: .deleteDirectoryTree
+            )
+            let item = CategoryItem(
+                name: entry,
+                pathDescription: displayPath,
+                iconName: rule.iconName,
+                iconColor: rule.iconColor,
+                sizeBytes: bytes,
+                sizeString: formatBytes(bytes),
+                rule: rule
+            )
+            childItems.append(item)
+        }
+
+        guard !childItems.isEmpty else { return [] }
+
+        childItems.sort { $0.name.lowercased() < $1.name.lowercased() }
+
+        let parentRule = CleanRule(
+            name: "Home Directory Leftovers",
+            pathDescription: basePath,
+            iconName: "folder.badge.minus",
+            iconColor: .pink,
+            cleanType: .none,
+            note: "Possible uninstalled app/tool leftover"
+        )
+        let parent = CategoryItem(
+            name: parentRule.name,
+            pathDescription: parentRule.pathDescription,
+            iconName: parentRule.iconName,
+            iconColor: parentRule.iconColor,
+            sizeBytes: totalBytes,
+            sizeString: formatBytes(totalBytes),
+            rule: parentRule,
+            children: childItems
+        )
+        return [parent]
     }
 
     // Clean specified category
@@ -524,6 +711,9 @@ struct ContentView: View {
                         try? fileManager.removeItem(atPath: fullPath)
                     }
                 }
+            case .deleteDirectoryTree:
+                let treePath = NSString(string: item.pathDescription).expandingTildeInPath
+                try? FileManager.default.removeItem(atPath: treePath)
             case .deletePaths(let paths):
                 let fileManager = FileManager.default
                 for path in paths {
