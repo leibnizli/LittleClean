@@ -1,7 +1,9 @@
 import SwiftUI
 
 enum CleanType {
+    case none
     case deleteDirectory
+    case deletePaths([String])
     case runCommand(executable: String, args: [String])
 }
 
@@ -12,6 +14,9 @@ struct CleanRule: Identifiable {
     let iconName: String
     let iconColor: Color
     var cleanType: CleanType = .deleteDirectory
+    var note: String? = nil
+    var isDynamicSimulatorRule: Bool = false
+    var isDynamicLeftoversRule: Bool = false
 }
 
 struct CleanConfig {
@@ -23,11 +28,19 @@ struct CleanConfig {
         CleanRule(name: "Xcode Archives", pathDescription: "~/Library/Developer/Xcode/Archives", iconName: "archivebox", iconColor: .indigo),
         CleanRule(name: "iOS Simulator Caches", pathDescription: "~/Library/Developer/CoreSimulator/Caches", iconName: "iphone", iconColor: .teal),
         CleanRule(
-            name: "Unavailable Simulators",
+            name: "Simulator Devices by Version",
             pathDescription: "~/Library/Developer/CoreSimulator/Devices",
-            iconName: "iphone.slash",
-            iconColor: .gray,
-            cleanType: .runCommand(executable: "/usr/bin/xcrun", args: ["simctl", "delete", "unavailable"])
-        )
+            iconName: "iphone.badge.play",
+            iconColor: .purple,
+            isDynamicSimulatorRule: true
+        ),
+        CleanRule(
+            name: "Uninstalled App Leftovers",
+            pathDescription: "~/Library/Application Support",
+            iconName: "folder.badge.minus",
+            iconColor: .pink,
+            isDynamicLeftoversRule: true
+        ),
+        CleanRule(name: "Saved App State", pathDescription: "~/Library/Saved Application State", iconName: "clock.arrow.circlepath", iconColor: .mint)
     ]
 }

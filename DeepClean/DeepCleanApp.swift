@@ -13,6 +13,5 @@ struct DeepCleanApp: App {
         WindowGroup {
             ContentView()
         }
-        .windowStyle(.hiddenTitleBar)
     }
 }

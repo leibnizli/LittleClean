@@ -9,6 +9,7 @@ struct CategoryItem: Identifiable {
     let iconColor: Color
     let sizeString: String
     let rule: CleanRule
+    var children: [CategoryItem]? = nil
     var isSelected: Bool = true
 }
 
@@ -132,32 +133,39 @@ struct ContentView: View {
             
             // MARK: - Right Column: Cleanable Directory List
             VStack(alignment: .leading, spacing: 0) {
-                List {
-                    ForEach(categories) { item in
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.name)
-                                    .font(.system(size: 14, weight: .medium))
-                                Text(item.pathDescription)
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            Spacer()
-                            
-                            Text(item.sizeString)
-                                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                List(categories, children: \.children) { item in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.name)
+                                .font(.system(size: 14, weight: .medium))
+                            Text(item.pathDescription)
+                                .font(.caption)
                                 .foregroundColor(.secondary)
-                                .padding(.trailing, 8)
-                            
-                            Button {
-                                openInFinder(pathDescription: item.pathDescription)
-                            } label: {
-                                Image(systemName: "magnifyingglass")
+                            if let note = item.rule.note {
+                                Text(note)
+                                    .font(.caption2)
+                                    .foregroundColor(.orange)
                             }
-                            .buttonStyle(.borderless)
-                            .controlSize(.small)
-                            
+                        }
+                        
+                        Spacer()
+                        
+                        Text(item.sizeString)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(.secondary)
+                            .padding(.trailing, 8)
+                        
+                        Button {
+                            openInFinder(pathDescription: item.pathDescription)
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        
+                        if case .none = item.rule.cleanType {
+                            // Hide Clean button for reminder-only items
+                        } else {
                             Button("Clean") {
                                 performClean(item: item)
                             }
@@ -165,15 +173,14 @@ struct ContentView: View {
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
                         }
-                        .padding(.vertical, 6)
                     }
+                    .padding(.vertical, 4)
                 }
                 .listStyle(.inset(alternatesRowBackgrounds: true))
             }
             .background(Color(NSColor.underPageBackgroundColor))
         }
         .frame(minWidth: 820, minHeight: 520)
-        .ignoresSafeArea()
     }
     
     // Scan configured paths and display existing items with calculated size
@@ -189,7 +196,13 @@ struct ContentView: View {
                 let expandedPath = NSString(string: rule.pathDescription).expandingTildeInPath
                 var isDirectory: ObjCBool = false
                 
-                if fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) {
+                if rule.isDynamicSimulatorRule {
+                    let simItems = self.scanSimulatorVersions(basePath: rule.pathDescription)
+                    foundCategories.append(contentsOf: simItems)
+                } else if rule.isDynamicLeftoversRule {
+                    let leftoverItems = self.scanAppLeftovers(basePath: rule.pathDescription)
+                    foundCategories.append(contentsOf: leftoverItems)
+                } else if fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) {
                     let totalBytes = calculateDirectorySize(at: expandedPath, isDirectory: isDirectory.boolValue)
                     let sizeStr = formatBytes(totalBytes)
                     
@@ -212,11 +225,323 @@ struct ContentView: View {
         }
     }
     
+    // Dynamically scan simulator devices by OS version
+    private func scanSimulatorVersions(basePath: String) -> [CategoryItem] {
+        let expandedPath = NSString(string: basePath).expandingTildeInPath
+        let fileManager = FileManager.default
+        guard let deviceFolders = try? fileManager.contentsOfDirectory(atPath: expandedPath) else {
+            return []
+        }
+        
+        var versionGroups: [String: (paths: [String], bytes: Int64, count: Int)] = [:]
+        
+        for folder in deviceFolders {
+            let fullFolderURL = URL(fileURLWithPath: expandedPath).appendingPathComponent(folder)
+            let plistURL = fullFolderURL.appendingPathComponent("device.plist")
+            
+            if fileManager.fileExists(atPath: plistURL.path) {
+                var versionName = "Unknown Simulator"
+                if let data = try? Data(contentsOf: plistURL),
+                   let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+                   let runtime = plist["runtime"] as? String {
+                    versionName = parseRuntimeName(runtime)
+                }
+                
+                let folderSize = calculateDirectorySize(at: fullFolderURL.path, isDirectory: true)
+                if var existing = versionGroups[versionName] {
+                    existing.paths.append(fullFolderURL.path)
+                    existing.bytes += folderSize
+                    existing.count += 1
+                    versionGroups[versionName] = existing
+                } else {
+                    versionGroups[versionName] = (paths: [fullFolderURL.path], bytes: folderSize, count: 1)
+                }
+            }
+        }
+        
+        // Only remind if multiple versions (> 1) are detected
+        guard versionGroups.keys.count > 1 else {
+            return []
+        }
+        
+        let sortedVersions = versionGroups.keys.sorted()
+        let versionsSummary = sortedVersions.joined(separator: ", ")
+        let totalBytes = versionGroups.values.reduce(0) { $0 + $1.bytes }
+        
+        let reminderRule = CleanRule(
+            name: "Multiple Simulator Versions",
+            pathDescription: basePath,
+            iconName: "exclamationmark.triangle.fill",
+            iconColor: .orange,
+            cleanType: .none,
+            note: "Detected \(versionGroups.keys.count) versions (\(versionsSummary)). Please manage or delete unused versions if necessary."
+        )
+        
+        let item = CategoryItem(
+            name: reminderRule.name,
+            pathDescription: reminderRule.pathDescription,
+            iconName: reminderRule.iconName,
+            iconColor: reminderRule.iconColor,
+            sizeString: formatBytes(totalBytes),
+            rule: reminderRule
+        )
+        
+        return [item]
+    }
+    
+    private func parseRuntimeName(_ runtime: String) -> String {
+        let components = runtime.components(separatedBy: ".")
+        guard let last = components.last else { return "Simulator" }
+        
+        let parts = last.components(separatedBy: "-")
+        if parts.count >= 3 {
+            let osType = parts[0]
+            let major = parts[1]
+            let minor = parts[2]
+            return "\(osType) \(major).\(minor)"
+        } else if parts.count == 2 {
+            return "\(parts[0]) \(parts[1])"
+        }
+        return last
+    }
+    
+    // Fetch all currently installed application names and bundle identifiers across system application directories
+    private func normalizeString(_ str: String) -> String {
+        return str.lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: ".", with: "")
+    }
+    
+    private func isBinaryInPATH(_ name: String) -> Bool {
+        let cleanName = name.lowercased()
+        let pathDirs = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            (NSHomeDirectory() as NSString).appendingPathComponent(".cargo/bin"),
+            (NSHomeDirectory() as NSString).appendingPathComponent("go/bin")
+        ]
+        let fileManager = FileManager.default
+        for dir in pathDirs {
+            let fullPath = (dir as NSString).appendingPathComponent(cleanName)
+            if fileManager.fileExists(atPath: fullPath) {
+                return true
+            }
+        }
+        return false
+    }
+    
+    // Fetch all currently installed application names and bundle identifiers across system application directories
+    private func fetchInstalledAppIdentifiers() -> Set<String> {
+        var identifiers = Set<String>()
+        let appDirs = [
+            "/Applications",
+            "/System/Applications",
+            (NSHomeDirectory() as NSString).appendingPathComponent("Applications")
+        ]
+        
+        let fileManager = FileManager.default
+        
+        for dir in appDirs {
+            guard let items = try? fileManager.contentsOfDirectory(atPath: dir) else { continue }
+            for item in items {
+                if item.hasSuffix(".app") {
+                    let appBundleURL = URL(fileURLWithPath: dir).appendingPathComponent(item)
+                    
+                    // 1. Finder Display Name (e.g., "微信开发者工具")
+                    let finderDisplayName = fileManager.displayName(atPath: appBundleURL.path)
+                    let cleanFinderName = (finderDisplayName as NSString).deletingPathExtension.lowercased()
+                    identifiers.insert(cleanFinderName)
+                    identifiers.insert(normalizeString(cleanFinderName))
+                    
+                    // 2. Disk App Name (e.g., "wechatwebdevtools")
+                    let appName = (item as NSString).deletingPathExtension.lowercased()
+                    identifiers.insert(appName)
+                    identifiers.insert(normalizeString(appName))
+                    
+                    // 3. Info.plist
+                    let infoPlistURL = appBundleURL.appendingPathComponent("Contents/Info.plist")
+                    if let data = try? Data(contentsOf: infoPlistURL),
+                       let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
+                        if let bundleID = plist["CFBundleIdentifier"] as? String {
+                            let bLower = bundleID.lowercased()
+                            identifiers.insert(bLower)
+                            identifiers.insert(normalizeString(bLower))
+                            let bundleLast = (bundleID as NSString).pathExtension.lowercased()
+                            if !bundleLast.isEmpty {
+                                identifiers.insert(bundleLast)
+                                identifiers.insert(normalizeString(bundleLast))
+                            }
+                        }
+                        if let bundleName = plist["CFBundleName"] as? String {
+                            let bName = bundleName.lowercased()
+                            identifiers.insert(bName)
+                            identifiers.insert(normalizeString(bName))
+                        }
+                        if let displayName = plist["CFBundleDisplayName"] as? String {
+                            let dName = displayName.lowercased()
+                            identifiers.insert(dName)
+                            identifiers.insert(normalizeString(dName))
+                        }
+                    }
+                    
+                    // 4. Scan all localized InfoPlist.strings (e.g., zh_CN.lproj, zh-Hans.lproj)
+                    let resourcesURL = appBundleURL.appendingPathComponent("Contents/Resources")
+                    if let resContents = try? fileManager.contentsOfDirectory(atPath: resourcesURL.path) {
+                        for resItem in resContents {
+                            if resItem.hasSuffix(".lproj") {
+                                let stringsURL = resourcesURL.appendingPathComponent(resItem).appendingPathComponent("InfoPlist.strings")
+                                if let data = try? Data(contentsOf: stringsURL),
+                                   let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: String] {
+                                    if let dispName = plist["CFBundleDisplayName"] {
+                                        let lower = dispName.lowercased()
+                                        identifiers.insert(lower)
+                                        identifiers.insert(normalizeString(lower))
+                                    }
+                                    if let bName = plist["CFBundleName"] {
+                                        let lower = bName.lowercased()
+                                        identifiers.insert(lower)
+                                        identifiers.insert(normalizeString(lower))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return identifiers
+    }
+    
+    // Dynamically scan for folders in Application Support that belong to UNINSTALLED applications
+    private func scanAppLeftovers(basePath: String) -> [CategoryItem] {
+        let expandedBasePath = NSString(string: basePath).expandingTildeInPath
+        let fileManager = FileManager.default
+        guard let subfolders = try? fileManager.contentsOfDirectory(atPath: expandedBasePath) else {
+            return []
+        }
+        
+        let installedApps = fetchInstalledAppIdentifiers()
+        
+        // System / macOS essential folders to skip
+        let systemIgnoreList: Set<String> = [
+            "addressbook", "clouddocs", "mobilesync", "dock", "safari", "apple", "com.apple.",
+            "accounts", "crashreporter", "defaultappprovider", "knowledge", "quick look",
+            "app store", "callhistorydb", "coresimulator", "developer", "system", "syncservices",
+            "bluetooth", "preferences", "keychains", "logs", "caches"
+        ]
+        
+        var childItems: [CategoryItem] = []
+        var totalBytes: Int64 = 0
+        
+        for folder in subfolders {
+            if folder.hasPrefix(".") || folder.hasSuffix("_Lock") {
+                continue
+            }
+            
+            let lowerFolder = folder.lowercased()
+            let normalizedFolder = normalizeString(folder)
+            
+            // 1. Check if folder is a macOS system folder
+            let isSystemFolder = systemIgnoreList.contains { sysKey in
+                lowerFolder == sysKey || lowerFolder.hasPrefix(sysKey)
+            }
+            if isSystemFolder {
+                continue
+            }
+            
+            // 2. Check if folder corresponds to a CLI binary tool in PATH
+            if isBinaryInPATH(folder) || isBinaryInPATH(lowerFolder) || isBinaryInPATH(normalizedFolder) {
+                continue
+            }
+            
+            // 3. Check if folder matches any installed application
+            let isAppInstalled = installedApps.contains { appKey in
+                guard !appKey.isEmpty else { return false }
+                let normalizedAppKey = normalizeString(appKey)
+                if lowerFolder == appKey || normalizedFolder == normalizedAppKey {
+                    return true
+                }
+                if normalizedFolder.count >= 4 && normalizedAppKey.count >= 4 {
+                    if normalizedFolder.contains(normalizedAppKey) || normalizedAppKey.contains(normalizedFolder) {
+                        return true
+                    }
+                }
+                return false
+            }
+            
+            // If the app is currently installed, SKIP IT (Not a leftover!)
+            if isAppInstalled {
+                continue
+            }
+            
+            let fullPath = (expandedBasePath as NSString).appendingPathComponent(folder)
+            var isDirectory: ObjCBool = false
+            
+            if fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) && isDirectory.boolValue {
+                let sizeBytes = calculateDirectorySize(at: fullPath, isDirectory: true)
+                // Only list leftover folders taking space (> 500 KB)
+                if sizeBytes > 500_000 {
+                    totalBytes += sizeBytes
+                    let displayPath = "\(basePath)/\(folder)"
+                    let childRule = CleanRule(
+                        name: folder,
+                        pathDescription: displayPath,
+                        iconName: "folder.badge.minus",
+                        iconColor: .pink,
+                        cleanType: .deleteDirectory,
+                        note: "Uninstalled Application Data"
+                    )
+                    
+                    let childItem = CategoryItem(
+                        name: childRule.name,
+                        pathDescription: childRule.pathDescription,
+                        iconName: childRule.iconName,
+                        iconColor: childRule.iconColor,
+                        sizeString: formatBytes(sizeBytes),
+                        rule: childRule
+                    )
+                    childItems.append(childItem)
+                }
+            }
+        }
+        
+        guard !childItems.isEmpty else { return [] }
+        
+        childItems.sort { $0.name.lowercased() < $1.name.lowercased() }
+        
+        let parentRule = CleanRule(
+            name: "Uninstalled App Leftovers",
+            pathDescription: basePath,
+            iconName: "folder.badge.minus",
+            iconColor: .pink,
+            cleanType: .deleteDirectory
+        )
+        
+        let parentItem = CategoryItem(
+            name: parentRule.name,
+            pathDescription: parentRule.pathDescription,
+            iconName: parentRule.iconName,
+            iconColor: parentRule.iconColor,
+            sizeString: formatBytes(totalBytes),
+            rule: parentRule,
+            children: childItems
+        )
+        
+        return [parentItem]
+    }
+    
     // Clean specified category
     private func performClean(item: CategoryItem) {
         isScanning = true
         DispatchQueue.global(qos: .userInitiated).async {
             switch item.rule.cleanType {
+            case .none:
+                break
             case .deleteDirectory:
                 let expandedPath = NSString(string: item.pathDescription).expandingTildeInPath
                 let fileManager = FileManager.default
@@ -225,6 +550,11 @@ struct ContentView: View {
                         let fullPath = (expandedPath as NSString).appendingPathComponent(file)
                         try? fileManager.removeItem(atPath: fullPath)
                     }
+                }
+            case .deletePaths(let paths):
+                let fileManager = FileManager.default
+                for path in paths {
+                    try? fileManager.removeItem(atPath: path)
                 }
             case .runCommand(let executable, let args):
                 let process = Process()
