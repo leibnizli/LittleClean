@@ -490,7 +490,8 @@ struct ContentView: View {
             pathDescription: basePath,
             iconName: "folder.badge.minus",
             iconColor: .pink,
-            cleanType: .deleteDirectory
+            cleanType: .deleteDirectory,
+            note: "Uninstalled Application Data"
         )
 
         let parentItem = CategoryItem(
