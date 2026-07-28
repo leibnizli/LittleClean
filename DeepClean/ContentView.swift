@@ -30,6 +30,7 @@ struct ContentView: View {
     @State private var freeBytes: Int64 = 0
     @State private var usedBytes: Int64 = 0
     @State private var isScanning: Bool = false
+    @State private var isCleaning: Bool = false
 
     @State private var categories: [CategoryItem] = []
 
@@ -127,12 +128,8 @@ struct ContentView: View {
     private var topStatusBar: some View {
         HStack(spacing: 14) {
 
-            Label("Total \(formatBytes(totalBytes))", systemImage: "internaldrive")
+            Label("\(formatBytes(usedBytes)) / \(formatBytes(totalBytes))", systemImage: "internaldrive")
                 .foregroundColor(.secondary)
-                .font(.system(size: 12))
-
-            Label("Used \(formatBytes(usedBytes))", systemImage: "circle.fill")
-                .foregroundColor(.gray)
                 .font(.system(size: 12))
 
             Label("Free \(formatBytes(freeBytes))", systemImage: "circle.fill")
@@ -160,6 +157,20 @@ struct ContentView: View {
                 Text("Scanning…")
                     .font(.caption)
                     .foregroundColor(.secondary)
+            } else if isCleaning {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Cleaning…")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                Button {
+                    performScan()
+                } label: {
+                    Text("Scan")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
         }
         .padding(.horizontal, 16)
@@ -175,7 +186,7 @@ struct ContentView: View {
             } label: {
                 Text("Clean")
             }
-            .disabled(selectedIDs.isEmpty || isScanning)
+            .disabled(selectedIDs.isEmpty || isScanning || isCleaning)
             .buttonStyle(.borderedProminent)
 
             Spacer()
@@ -878,17 +889,18 @@ struct ContentView: View {
         return result
     }
 
-    // Clean every selected cleanable item, then rescan
+    // Clean every selected cleanable item; the user triggers a rescan manually
     private func performCleanSelected() {
         let toClean = collectCleanableSelected(from: categories)
         guard !toClean.isEmpty else { return }
-        isScanning = true
+        isCleaning = true
         DispatchQueue.global(qos: .userInitiated).async {
             for item in toClean {
                 self.cleanItem(item)
             }
             DispatchQueue.main.async {
-                self.performScan()
+                self.isCleaning = false
+                self.selectedIDs = []
             }
         }
     }
