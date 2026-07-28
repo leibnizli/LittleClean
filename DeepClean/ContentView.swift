@@ -1130,6 +1130,97 @@ struct ContentView: View {
         return map
     }
 
+    // Enumerate every Node.js installation on the system (nvm/fnm/volta/asdf/nodenv/n,
+    // Homebrew, /usr/local, npmrc/env prefix, active PATH) and list each one's global
+    // packages. Users often have several side by side, so we scan the filesystem rather
+    // than trusting only the active `npm` in PATH.
+    private func scanNodeInstalls(dirs: [String], ownedDirs: inout Set<String>) -> CategoryItem? {
+        let home = NSHomeDirectory()
+        let fm = FileManager.default
+        var roots: [(label: String, prefix: String)] = []
+        var seen = Set<String>()
+
+        func addPrefix(_ label: String, _ prefix: String, requireNodeBinary: Bool = true) {
+            let resolved = URL(fileURLWithPath: prefix).resolvingSymlinksInPath().path
+            if requireNodeBinary {
+                let nodeBin = (resolved as NSString).appendingPathComponent("bin/node")
+                guard fm.fileExists(atPath: nodeBin) else { return }
+            } else {
+                let nm = (resolved as NSString).appendingPathComponent("lib/node_modules")
+                guard fm.fileExists(atPath: nm) else { return }
+            }
+            if seen.insert(resolved).inserted {
+                roots.append((label, resolved))
+            }
+        }
+
+        func addVersions(_ baseDir: String, manager: String, suffix: String = "") {
+            guard let versions = try? fm.contentsOfDirectory(atPath: baseDir) else { return }
+            for v in versions.sorted() {
+                var root = (baseDir as NSString).appendingPathComponent(v)
+                if !suffix.isEmpty { root = (root as NSString).appendingPathComponent(suffix) }
+                let ver = v.hasPrefix("v") ? String(v.dropFirst()) : v
+                addPrefix("\(manager) \(ver)", root)
+            }
+        }
+
+        addVersions((home as NSString).appendingPathComponent(".nvm/versions/node"), manager: "nvm")
+        addVersions((home as NSString).appendingPathComponent(".fnm/node-versions"), manager: "fnm", suffix: "installation")
+        addVersions((home as NSString).appendingPathComponent("Library/Application Support/fnm/node-versions"), manager: "fnm", suffix: "installation")
+        addVersions((home as NSString).appendingPathComponent(".volta/tools/image/node"), manager: "volta")
+        addVersions((home as NSString).appendingPathComponent(".asdf/installs/nodejs"), manager: "asdf")
+        addVersions((home as NSString).appendingPathComponent(".nodenv/versions"), manager: "nodenv")
+        let nPrefix = ProcessInfo.processInfo.environment["N_PREFIX"] ?? (home as NSString).appendingPathComponent("n")
+        addVersions((nPrefix as NSString).appendingPathComponent("n/versions/node"), manager: "n")
+        addVersions("/usr/local/n/versions/node", manager: "n")
+        addPrefix("Homebrew", "/opt/homebrew")
+        addPrefix("/usr/local", "/usr/local")
+        // custom global prefix from env or ~/.npmrc (no node binary lives there)
+        if let envPrefix = ProcessInfo.processInfo.environment["NPM_CONFIG_PREFIX"], !envPrefix.isEmpty {
+            addPrefix("npm prefix (env)", envPrefix, requireNodeBinary: false)
+        }
+        let npmrc = (home as NSString).appendingPathComponent(".npmrc")
+        if let content = try? String(contentsOfFile: npmrc, encoding: .utf8) {
+            for raw in content.split(separator: "\n") {
+                let s = String(raw).trimmingCharacters(in: .whitespaces)
+                guard s.hasPrefix("prefix") else { continue }
+                let parts = s.split(separator: "=", maxSplits: 1)
+                if parts.count == 2 {
+                    let val = String(parts[1]).trimmingCharacters(in: .whitespaces)
+                    if !val.isEmpty {
+                        let expanded = val.hasPrefix("~/") ? (home as NSString).appendingPathComponent(String(val.dropFirst(2))) : val
+                        addPrefix("npmrc \(val)", expanded, requireNodeBinary: false)
+                    }
+                }
+            }
+        }
+        // Active npm in PATH (fallback for any install not covered above)
+        if let npmPath = locateBinary("npm", in: dirs) {
+            if let nm = runCommandCapture(npmPath, ["root", "-g"]), !nm.isEmpty {
+                let libDir = (nm as NSString).deletingLastPathComponent
+                addPrefix("PATH (active)", (libDir as NSString).deletingLastPathComponent)
+            }
+        }
+
+        if roots.isEmpty { return nil }
+
+        var installNodes: [CategoryItem] = []
+        for (label, prefix) in roots {
+            let nm = (prefix as NSString).appendingPathComponent("lib/node_modules")
+            let pkgs = fm.fileExists(atPath: nm) ? sizedPackages(in: nm) : []
+            ownedDirs.insert((prefix as NSString).appendingPathComponent("bin"))
+            let displayLabel = "\(label)  (\(pkgs.count))"
+            if pkgs.isEmpty {
+                installNodes.append(displayItem(name: label, label: displayLabel, icon: "shippingbox.fill", color: .green, note: "no global packages", finderPath: nm.isEmpty ? nil : nm))
+            } else {
+                let children = pkgs.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (nm as NSString).appendingPathComponent($0.0)) }
+                installNodes.append(displayParent(name: label, label: displayLabel, icon: "shippingbox.fill", color: .green, children: children, finderPath: nm))
+            }
+        }
+
+        return displayParent(name: "Node.js", label: "Node.js", icon: "shippingbox.fill", color: .green, children: installNodes)
+    }
+
     // Build the read-only "Installed Tools" tree from non-system PATH tools and their modules.
     // Only top-level / user-installed packages are listed; each carries a best-effort on-disk size.
     private func scanInstalledTools() -> CategoryItem {
@@ -1185,21 +1276,9 @@ struct ContentView: View {
             }
         }
 
-        // --- npm (global) ---
-        if let npmPath = locateBinary("npm", in: dirs) {
-            var root: String?
-            var pkgs: [(String, Int64)] = []
-            if let r = runCommandCapture(npmPath, ["root", "-g"]) {
-                root = r
-                pkgs = sizedPackages(in: r)
-            }
-            if let prefix = runCommandCapture(npmPath, ["config", "get", "prefix"]) {
-                ownedDirs.insert((prefix as NSString).appendingPathComponent("bin"))
-            }
-            if !pkgs.isEmpty, let r = root {
-                let children = pkgs.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (r as NSString).appendingPathComponent($0.0)) }
-                toolNodes.append(displayParent(name: "npm", label: "npm (global)", icon: "shippingbox.fill", color: .green, children: children, finderPath: r))
-            }
+        // --- Node.js (enumerate every installation: nvm/fnm/volta/asdf/nodenv/n, Homebrew, /usr/local, npmrc/env prefix, active PATH) ---
+        if let nodeNode = scanNodeInstalls(dirs: dirs, ownedDirs: &ownedDirs) {
+            toolNodes.append(nodeNode)
         }
 
         // --- pnpm (global) ---
