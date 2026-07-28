@@ -40,6 +40,8 @@ struct ContentView: View {
     // Token used to invalidate stale "Installed Tools" background loads across rescans
     @State private var toolsLoadToken: Int = 0
 
+    @State private var newVersionUrl: String? = nil
+
     @State private var categories: [CategoryItem] = []
 
     // Outline table column sort order (click headers to sort); default: size descending
@@ -74,6 +76,7 @@ struct ContentView: View {
         .frame(minWidth: 720, minHeight: 460)
         .onAppear {
             performScan()
+            checkForUpdates()
         }
         .searchable(text: $searchText, prompt: "Search")
     }
@@ -226,10 +229,40 @@ struct ContentView: View {
 
             Spacer()
 
+            if let newVersionUrl = newVersionUrl, let url = URL(string: newVersionUrl) {
+                Link("New Version Available", destination: url)
+                    .foregroundColor(.blue)
+                    .font(.system(size: 13))
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
         .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private func checkForUpdates() {
+        let url = URL(string: "https://api.github.com/repos/leibnizli/DeepClean/releases/latest")!
+        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data, error == nil else { return }
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let tagName = json["tag_name"] as? String,
+                   let htmlUrl = json["html_url"] as? String {
+                    let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+                    let latestVersion = tagName.replacingOccurrences(of: "v", with: "")
+                    let currentVersionClean = currentVersion.replacingOccurrences(of: "v", with: "")
+                    
+                    if latestVersion.compare(currentVersionClean, options: .numeric) == .orderedDescending {
+                        DispatchQueue.main.async {
+                            self.newVersionUrl = htmlUrl
+                        }
+                    }
+                }
+            } catch {
+                print("Error parsing update info: \(error)")
+            }
+        }
+        task.resume()
     }
 
     // Scan configured paths and display existing items with calculated size
