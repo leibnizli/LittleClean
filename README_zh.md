@@ -4,6 +4,8 @@
 
 DeepClean 是一款强大而智能的 macOS 系统清理及开发者工具管理软件。它能帮助您安全地清理缓存、日志和卸载残留，释放宝贵的磁盘空间，同时提供对已安装的开发环境及全局包的深度透视功能。
 
+<img width="832" height="715" alt="Image" src="https://github.com/user-attachments/assets/963cfb51-f571-4223-bb3c-33fe8f35ae72" />
+
 ## 功能特性
 
 ### 🧹 智能系统清理
