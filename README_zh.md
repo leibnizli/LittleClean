@@ -6,6 +6,12 @@ DeepClean 是一款强大而智能的 macOS 系统清理及开发者工具管理
 
 <img width="832" height="715" alt="Image" src="https://github.com/user-attachments/assets/963cfb51-f571-4223-bb3c-33fe8f35ae72" />
 
+## 安装与运行
+
+您可以从 [Releases](https://github.com/leibnizli/DeepClean/releases) 页面下载最新编译好的版本。
+
+或者，您也可以克隆仓库后使用 Xcode 编译并运行。
+
 ## 功能特性
 
 ### 🧹 智能系统清理
@@ -39,9 +45,6 @@ DeepClean 能够对占据磁盘空间的无用文件进行分类并安全清理�
 - **实时搜索:** 瞬间过滤出你想要的缓存、工具或残留项。
 - **在 Finder 中显示:** 一键在 Finder 中定位并打开具体的缓存目录或应用程序，方便手动检查。
 - **可视化存储指示器:** 直观的磁盘使用情况进度条，一目了然地查看已用和可用空间。
-
-## 安装与运行
-当前处于开发阶段。请克隆仓库后使用 Xcode 编译并运行。
 
 ## 开源协议
 MIT

@@ -6,6 +6,12 @@ DeepClean is a powerful and intelligent macOS cleaner and developer tool manager
 
 <img width="832" height="715" alt="Image" src="https://github.com/user-attachments/assets/963cfb51-f571-4223-bb3c-33fe8f35ae72" />
 
+## Installation
+
+You can download the latest pre-compiled version from the [Releases](https://github.com/leibnizli/DeepClean/releases) page.
+
+Alternatively, you can clone the repository and build via Xcode.
+
 ## Features
 
 ### 🧹 Smart System Cleaning
@@ -39,9 +45,6 @@ Gain complete visibility into the size and location of your development environm
 - **Real-time Search:** Instantly filter through thousands of caches, tools, and leftovers.
 - **Reveal in Finder:** Easily open the exact directory or application bundle in Finder with a single click to manually inspect files.
 - **Visual Storage Indicator:** An intuitive disk usage bar showing used vs. free space at a glance.
-
-## Installation
-Currently in development. Clone the repository and build via Xcode.
 
 ## License
 MIT
