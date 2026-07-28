@@ -126,6 +126,19 @@ struct ContentView: View {
     // MARK: - Top Status Bar
     private var topStatusBar: some View {
         HStack(spacing: 14) {
+
+            Label("Total \(formatBytes(totalBytes))", systemImage: "internaldrive")
+                .foregroundColor(.secondary)
+                .font(.system(size: 12))
+
+            Label("Used \(formatBytes(usedBytes))", systemImage: "circle.fill")
+                .foregroundColor(.gray)
+                .font(.system(size: 12))
+
+            Label("Free \(formatBytes(freeBytes))", systemImage: "circle.fill")
+                .foregroundColor(.green)
+                .font(.system(size: 12))
+            Divider().frame(height: 14)
             HStack(spacing: 8) {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
@@ -139,21 +152,6 @@ struct ContentView: View {
                 }
                 .frame(width: 150, height: 6)
             }
-
-            Divider().frame(height: 14)
-
-            Label("Total \(formatBytes(totalBytes))", systemImage: "internaldrive")
-                .foregroundColor(.secondary)
-                .font(.system(size: 12))
-
-            Label("Used \(formatBytes(usedBytes))", systemImage: "circle.fill")
-                .foregroundColor(.gray)
-                .font(.system(size: 12))
-
-            Label("Free \(formatBytes(freeBytes))", systemImage: "circle.fill")
-                .foregroundColor(.green)
-                .font(.system(size: 12))
-
             Spacer()
 
             if isScanning {
@@ -172,12 +170,6 @@ struct ContentView: View {
     // MARK: - Bottom Action Bar: Selection + Clean
     private var bottomActionBar: some View {
         HStack(spacing: 14) {
-            Text("\(selectedIDs.count) selected")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-
-            Spacer()
-
             Button {
                 performCleanSelected()
             } label: {
@@ -185,6 +177,9 @@ struct ContentView: View {
             }
             .disabled(selectedIDs.isEmpty || isScanning)
             .buttonStyle(.borderedProminent)
+
+            Spacer()
+
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
