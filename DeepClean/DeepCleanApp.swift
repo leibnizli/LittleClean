@@ -13,5 +13,10 @@ struct DeepCleanApp: App {
         WindowGroup {
             ContentView()
         }
+        .commands {
+            CommandGroup(replacing: .help) {
+                Link("Website", destination: URL(string: "https://arayofsunshine.dev/")!)
+            }
+        }
     }
 }

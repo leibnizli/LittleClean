@@ -6,11 +6,17 @@ struct CategoryItem: Identifiable {
     let pathDescription: String
     let iconName: String
     let iconColor: Color
-    let sizeBytes: Int64
-    let sizeString: String
+    var sizeBytes: Int64
+    var sizeString: String
     let rule: CleanRule
     var children: [CategoryItem]? = nil
     var isSelected: Bool = true
+    // Read-only informational node: no checkbox, never cleaned (Finder reveal via finderPath)
+    var isDisplayOnly: Bool = false
+    // Real filesystem location to reveal in Finder (display-only nodes use a label as pathDescription)
+    var finderPath: String? = nil
+    // Override label shown in the Path column (used to show ancestor context in search results)
+    var displayPath: String? = nil
 }
 
 private enum SelectionState {
@@ -31,14 +37,19 @@ struct ContentView: View {
     @State private var usedBytes: Int64 = 0
     @State private var isScanning: Bool = false
     @State private var isCleaning: Bool = false
+    // Token used to invalidate stale "Installed Tools" background loads across rescans
+    @State private var toolsLoadToken: Int = 0
 
     @State private var categories: [CategoryItem] = []
 
-    // Outline table column sort order (click headers to sort)
-    @State private var sortOrder: [KeyPathComparator<CategoryItem>] = []
+    // Outline table column sort order (click headers to sort); default: size descending
+    @State private var sortOrder: [KeyPathComparator<CategoryItem>] = [KeyPathComparator(\.sizeBytes, order: .reverse)]
 
     // Checkbox multi-selection of cleanable items
     @State private var selectedIDs: Set<UUID> = []
+
+    // Search query (filters the table to matching leaves)
+    @State private var searchText: String = ""
 
     var usedPercentage: Int {
         guard totalBytes > 0 else { return 0 }
@@ -64,25 +75,32 @@ struct ContentView: View {
         .onAppear {
             performScan()
         }
+        .searchable(text: $searchText, prompt: "Search")
     }
 
     // MARK: - Cleanable Directory Outline Table
     private var cleanListView: some View {
-        Table(sortedCategories, children: \.children, sortOrder: $sortOrder) {
+        Table(displayedCategories, children: \.children, sortOrder: $sortOrder) {
             TableColumn("Path", value: \.pathDescription) { item in
                 HStack(alignment: .center, spacing: 6) {
-                    let state = selectionState(for: item)
-                    let enabled = isCleanable(item)
-                    Button {
-                        toggleSelection(item)
-                    } label: {
-                        Image(systemName: state.symbolName)
-                            .foregroundColor(enabled ? Color(NSColor.controlAccentColor) : .secondary)
+                    if item.isDisplayOnly {
+                        Image(systemName: item.iconName)
+                            .foregroundColor(item.iconColor)
+                            .frame(width: 16)
+                    } else {
+                        let state = selectionState(for: item)
+                        let enabled = isCleanable(item)
+                        Button {
+                            toggleSelection(item)
+                        } label: {
+                            Image(systemName: state.symbolName)
+                                .foregroundColor(enabled ? Color(NSColor.controlAccentColor) : .secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!enabled)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!enabled)
 
-                    Text(item.pathDescription)
+                    Text(item.displayPath ?? item.pathDescription)
                         .font(.system(size: 13))
                     if let note = item.rule.note {
                         Text("(\(note))")
@@ -100,13 +118,16 @@ struct ContentView: View {
             .width(min: 90, ideal: 110, max: 150)
 
             TableColumn("") { item in
-                Button {
-                    openInFinder(pathDescription: item.pathDescription)
-                } label: {
-                    Image(systemName: "magnifyingglass")
+                let target = item.isDisplayOnly ? item.finderPath : item.pathDescription
+                if let target = target, !target.isEmpty {
+                    Button {
+                        openInFinder(pathDescription: target)
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
             }
             .width(min: 40, ideal: 50, max: 60)
         }
@@ -115,12 +136,41 @@ struct ContentView: View {
         .background(Color(NSColor.underPageBackgroundColor))
     }
 
-    // Apply current sort order to top-level items and their children
-    private var sortedCategories: [CategoryItem] {
-        var result = categories.sorted(using: sortOrder)
+    // Items shown in the table: when searching, a flat list of matching leaves (each labeled
+    // with its ancestor chain so matches are always visible); otherwise the full hierarchy.
+    // Then sorted by the current column sort order.
+    private var displayedCategories: [CategoryItem] {
+        let base = searchText.trimmingCharacters(in: .whitespaces).isEmpty
+            ? categories
+            : flatFilteredLeaves(categories, query: searchText)
+        var result = base.sorted(using: sortOrder)
         for index in result.indices {
             result[index].children?.sort(using: sortOrder)
         }
+        return result
+    }
+
+    // Flatten the tree to leaf nodes matching `query`, each relabeled with its ancestor chain.
+    private func flatFilteredLeaves(_ items: [CategoryItem], query: String) -> [CategoryItem] {
+        let q = query.lowercased()
+        var result: [CategoryItem] = []
+        func walk(_ items: [CategoryItem], ancestors: [String]) {
+            for item in items {
+                if let children = item.children, !children.isEmpty {
+                    walk(children, ancestors: ancestors + [item.pathDescription])
+                } else {
+                    let context = (ancestors + [item.pathDescription]).joined(separator: " / ")
+                    let hay = (item.name + " " + item.pathDescription + " " + context + " " + (item.rule.note ?? "")).lowercased()
+                    if hay.contains(q) {
+                        var copy = item
+                        copy.displayPath = context
+                        copy.children = nil
+                        result.append(copy)
+                    }
+                }
+            }
+        }
+        walk(items, ancestors: [])
         return result
     }
 
@@ -131,24 +181,9 @@ struct ContentView: View {
             Label("\(formatBytes(usedBytes)) / \(formatBytes(totalBytes))", systemImage: "internaldrive")
                 .foregroundColor(.secondary)
                 .font(.system(size: 12))
-
-            Label("Free \(formatBytes(freeBytes))", systemImage: "circle.fill")
+            Text("Free \(formatBytes(freeBytes))")
                 .foregroundColor(.green)
                 .font(.system(size: 12))
-            Divider().frame(height: 14)
-            HStack(spacing: 8) {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.green)
-                        
-                        Capsule()
-                            .fill(Color.gray)
-                            .frame(width: max(0, geometry.size.width * CGFloat(usedPercentage) / 100))
-                    }
-                }
-                .frame(width: 150, height: 6)
-            }
             Spacer()
 
             if isScanning {
@@ -246,6 +281,26 @@ struct ContentView: View {
                 self.categories = foundCategories
                 self.selectedIDs = []
                 self.isScanning = false
+                // Phase 2: load the informational "Installed Tools" section in the background
+                self.loadInstalledToolsAsync()
+            }
+        }
+    }
+
+    // Phase 2 of the scan: build the read-only "Installed Tools" tree off the main thread
+    // and merge it in when ready. A token invalidates stale loads across rescans.
+    private func loadInstalledToolsAsync() {
+        toolsLoadToken += 1
+        let token = toolsLoadToken
+        DispatchQueue.global(qos: .utility).async {
+            let toolsItem = self.scanInstalledTools()
+            DispatchQueue.main.async {
+                guard token == self.toolsLoadToken, !self.isScanning else { return }
+                // Avoid duplicates if a load somehow lands twice
+                guard !self.categories.contains(where: { $0.isDisplayOnly && $0.name == "Installed Tools" }) else { return }
+                if toolsItem.children?.isEmpty == false {
+                    self.categories.append(toolsItem)
+                }
             }
         }
     }
@@ -845,6 +900,477 @@ struct ContentView: View {
         return [parent]
     }
 
+    // MARK: - Installed Tools (read-only informational section)
+
+    // GUI apps don't inherit the user's shell PATH; ask the login shell for it.
+    private func userPath() -> String {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-ilc", "echo $PATH"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+        } catch {
+            return ProcessInfo.processInfo.environment["PATH"] ?? ""
+        }
+        // Login shells return instantly; guard against a shell that waits for input.
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5) {
+            if process.isRunning { process.terminate() }
+        }
+        process.waitUntilExit()
+        guard let data = try? pipe.fileHandleForReading.readToEnd(),
+              let out = String(data: data, encoding: .utf8) else {
+            return ProcessInfo.processInfo.environment["PATH"] ?? ""
+        }
+        let trimmed = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? (ProcessInfo.processInfo.environment["PATH"] ?? "") : trimmed
+    }
+
+    // Parse $PATH (from the user's shell) into non-system bin directories that exist,
+    // supplemented with common non-system tool dirs for robustness.
+    private func nonSystemPathDirs() -> [String] {
+        let home = NSHomeDirectory()
+        let systemPrefixes = [
+            "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+            "/System", "/Library", "/usr/libexec", "/usr/lib",
+            "/AppleInternal", "/opt/Xcode", "/Applications"
+        ]
+
+        var seen = Set<String>()
+        var result: [String] = []
+
+        func consider(_ dir: String) {
+            let isSystem = systemPrefixes.contains { dir == $0 || dir.hasPrefix($0 + "/") }
+            if isSystem { return }
+            if dir.contains("/Xcode.app/") || dir.contains("/Toolchains/") || dir.contains("/Developer/") {
+                return
+            }
+            let resolved = URL(fileURLWithPath: dir).resolvingSymlinksInPath().path
+            if seen.contains(resolved) { return }
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: resolved, isDirectory: &isDir), isDir.boolValue {
+                seen.insert(resolved)
+                result.append(resolved)
+            }
+        }
+
+        for raw in userPath().split(separator: ":", omittingEmptySubsequences: true) {
+            var dir = String(raw)
+            if dir.hasPrefix("~/") {
+                dir = (home as NSString).appendingPathComponent(String(dir.dropFirst(2)))
+            }
+            consider(dir)
+        }
+        // Supplement with common non-system tool dirs (robustness for GUI-launched apps)
+        let common = [
+            "/opt/homebrew/bin", "/usr/local/bin",
+            (home as NSString).appendingPathComponent(".cargo/bin"),
+            (home as NSString).appendingPathComponent(".local/bin"),
+            (home as NSString).appendingPathComponent("go/bin"),
+            (home as NSString).appendingPathComponent(".deno/bin"),
+            (home as NSString).appendingPathComponent(".bun/bin"),
+            (home as NSString).appendingPathComponent(".volta/bin"),
+            (home as NSString).appendingPathComponent(".yarn/bin"),
+            (home as NSString).appendingPathComponent("Library/pnpm")
+        ]
+        for d in common { consider(d) }
+        return result
+    }
+
+    // Run an executable and return trimmed stdout, or nil on failure.
+    private func runCommandCapture(_ executable: String, _ args: [String]) -> String? {
+        guard FileManager.default.isExecutableFile(atPath: executable) else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        process.waitUntilExit()
+        guard process.terminationStatus == 0,
+              let data = try? pipe.fileHandleForReading.readToEnd(),
+              let output = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // Full path of `name` if present and executable in any of `dirs`.
+    private func locateBinary(_ name: String, in dirs: [String]) -> String? {
+        for dir in dirs {
+            let full = (dir as NSString).appendingPathComponent(name)
+            if FileManager.default.isExecutableFile(atPath: full) {
+                return full
+            }
+        }
+        return nil
+    }
+
+    // Sorted executable file names in a directory.
+    private func binariesInDir(_ dir: String) -> [String] {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
+        var result = Set<String>()
+        for name in names {
+            let full = (dir as NSString).appendingPathComponent(name)
+            if fm.isExecutableFile(atPath: full) {
+                result.insert(name)
+            }
+        }
+        return result.sorted()
+    }
+
+    // Package names inside a node_modules directory (handles @scope/pkg).
+    private func packagesInNodeModules(_ dir: String) -> [String] {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(atPath: dir) else { return [] }
+        var pkgs: [String] = []
+        for item in items {
+            if item.hasPrefix(".") { continue }
+            if item.hasPrefix("@") {
+                let scopeDir = (dir as NSString).appendingPathComponent(item)
+                if let inner = try? fm.contentsOfDirectory(atPath: scopeDir) {
+                    for p in inner where !p.hasPrefix(".") {
+                        pkgs.append("\(item)/\(p)")
+                    }
+                }
+            } else {
+                pkgs.append(item)
+            }
+        }
+        return pkgs.sorted()
+    }
+
+    // Convenience builder for read-only display nodes.
+    private func displayItem(name: String, label: String, icon: String, color: Color, note: String? = nil, children: [CategoryItem]? = nil, sizeBytes: Int64 = 0, finderPath: String? = nil) -> CategoryItem {
+        CategoryItem(
+            name: name,
+            pathDescription: label,
+            iconName: icon,
+            iconColor: color,
+            sizeBytes: sizeBytes,
+            sizeString: sizeBytes > 0 ? formatBytes(sizeBytes) : "",
+            rule: CleanRule(name: name, pathDescription: label, iconName: icon, iconColor: color, cleanType: .none, note: note),
+            children: children,
+            isDisplayOnly: true,
+            finderPath: finderPath
+        )
+    }
+
+    // Display parent whose size is the sum of its children's sizes.
+    private func displayParent(name: String, label: String, icon: String, color: Color, note: String? = nil, children: [CategoryItem], finderPath: String? = nil) -> CategoryItem {
+        let total = children.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        return displayItem(name: name, label: label, icon: icon, color: color, note: note, children: children, sizeBytes: total, finderPath: finderPath)
+    }
+
+    // A read-only leaf module with an optional on-disk size and Finder location.
+    private func leaf(_ name: String, _ size: Int64 = 0, finderPath: String? = nil) -> CategoryItem {
+        displayItem(name: name, label: name, icon: "circle.fill", color: .secondary, sizeBytes: size, finderPath: finderPath)
+    }
+
+    // Parse `gem environment` for GEM PATHS entries (lines like "     - /path").
+    private func gemPaths(gemPath: String) -> [String] {
+        guard let out = runCommandCapture(gemPath, ["environment"]) else { return [] }
+        var seen = Set<String>()
+        var paths: [String] = []
+        let regex = try? NSRegularExpression(pattern: "^\\s+-\\s+(/.+)$")
+        for raw in out.split(separator: "\n") {
+            let line = String(raw)
+            let range = NSRange(line.startIndex..., in: line)
+            if let m = regex?.firstMatch(in: line, options: [], range: range),
+               let r = Range(m.range(at: 1), in: line) {
+                let p = String(line[r]).trimmingCharacters(in: .whitespaces)
+                if seen.insert(p).inserted { paths.append(p) }
+            }
+        }
+        return paths
+    }
+
+    // Extract a gem's name from its gems/ directory entry (e.g. "net-http-persistent-4.0.0" -> "net-http-persistent").
+    private func gemName(from entry: String) -> String? {
+        let chars = Array(entry)
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "-", i + 1 < chars.count, chars[i + 1].isNumber {
+                return String(chars[0..<i])
+            }
+            i += 1
+        }
+        return nil
+    }
+
+    // Top-level package names in a node_modules dir, each paired with its on-disk size.
+    private func sizedPackages(in nodeModules: String) -> [(name: String, size: Int64)] {
+        packagesInNodeModules(nodeModules).map { name in
+            let dir = (nodeModules as NSString).appendingPathComponent(name)
+            return (name, calculateDirectorySize(at: dir, isDirectory: true))
+        }
+    }
+
+    // normalized .app name -> full path, for /Applications and ~/Applications (used to size casks).
+    private func appSizeMap() -> [String: String] {
+        var map: [String: String] = [:]
+        let dirs = ["/Applications", (NSHomeDirectory() as NSString).appendingPathComponent("Applications")]
+        let fm = FileManager.default
+        for d in dirs {
+            guard let names = try? fm.contentsOfDirectory(atPath: d) else { continue }
+            for name in names where name.hasSuffix(".app") {
+                let key = normalizeString((name as NSString).deletingPathExtension)
+                map[key] = (d as NSString).appendingPathComponent(name)
+            }
+        }
+        return map
+    }
+
+    // Build the read-only "Installed Tools" tree from non-system PATH tools and their modules.
+    // Only top-level / user-installed packages are listed; each carries a best-effort on-disk size.
+    private func scanInstalledTools() -> CategoryItem {
+        let dirs = nonSystemPathDirs()
+        let home = NSHomeDirectory()
+        let fm = FileManager.default
+
+        func trimLines(_ s: String) -> [String] {
+            s.split(separator: "\n")
+             .map { String($0).trimmingCharacters(in: .whitespaces) }
+             .filter { !$0.isEmpty }
+        }
+
+        var toolNodes: [CategoryItem] = []
+        var ownedDirs = Set<String>()
+
+        // --- Homebrew (top-level formulae via `brew leaves`, plus casks) ---
+        if let brewPath = locateBinary("brew", in: dirs) {
+            let prefix = runCommandCapture(brewPath, ["--prefix"]) ?? "/opt/homebrew"
+            let cellar = runCommandCapture(brewPath, ["--cellar"]) ?? "\(prefix)/Cellar"
+            let caskroom = "\(prefix)/Caskroom"
+            let appMap = appSizeMap()
+            var groups: [CategoryItem] = []
+
+            if let out = runCommandCapture(brewPath, ["leaves"]) {
+                let items = trimLines(out).map { name -> CategoryItem in
+                    let keg = (cellar as NSString).appendingPathComponent(name)
+                    return leaf(name, calculateDirectorySize(at: keg, isDirectory: true), finderPath: keg)
+                }.sorted { $0.sizeBytes > $1.sizeBytes }
+                if !items.isEmpty {
+                    groups.append(displayParent(name: "Formulae", label: "Formulae (\(items.count))", icon: "shippingbox.fill", color: .orange, children: items, finderPath: cellar))
+                }
+            }
+            if let out = runCommandCapture(brewPath, ["list", "--cask"]) {
+                let items = trimLines(out).map { name -> CategoryItem in
+                    let caskPath = (caskroom as NSString).appendingPathComponent(name)
+                    var size = calculateDirectorySize(at: caskPath, isDirectory: true)
+                    let appPath = appMap[normalizeString(name)]
+                    if let appPath = appPath {
+                        size += calculateDirectorySize(at: appPath, isDirectory: true)
+                    }
+                    return leaf(name, size, finderPath: appPath ?? caskPath)
+                }.sorted { $0.sizeBytes > $1.sizeBytes }
+                if !items.isEmpty {
+                    groups.append(displayParent(name: "Casks", label: "Casks (\(items.count))", icon: "shippingbox.fill", color: .orange, children: items, finderPath: caskroom))
+                }
+            }
+            ownedDirs.insert((brewPath as NSString).deletingLastPathComponent)
+            if dirs.contains("/usr/local/bin") { ownedDirs.insert("/usr/local/bin") }
+
+            if !groups.isEmpty {
+                toolNodes.append(displayParent(name: "Homebrew", label: "Homebrew", icon: "cup.and.saucer.fill", color: .orange, children: groups, finderPath: prefix))
+            }
+        }
+
+        // --- npm (global) ---
+        if let npmPath = locateBinary("npm", in: dirs) {
+            var root: String?
+            var pkgs: [(String, Int64)] = []
+            if let r = runCommandCapture(npmPath, ["root", "-g"]) {
+                root = r
+                pkgs = sizedPackages(in: r)
+            }
+            if let prefix = runCommandCapture(npmPath, ["config", "get", "prefix"]) {
+                ownedDirs.insert((prefix as NSString).appendingPathComponent("bin"))
+            }
+            if !pkgs.isEmpty, let r = root {
+                let children = pkgs.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (r as NSString).appendingPathComponent($0.0)) }
+                toolNodes.append(displayParent(name: "npm", label: "npm (global)", icon: "shippingbox.fill", color: .green, children: children, finderPath: r))
+            }
+        }
+
+        // --- pnpm (global) ---
+        if let pnpmPath = locateBinary("pnpm", in: dirs) {
+            var root: String?
+            var pkgs: [(String, Int64)] = []
+            if let r = runCommandCapture(pnpmPath, ["root", "-g"]) {
+                root = r
+                pkgs = sizedPackages(in: r)
+            }
+            if let gbin = runCommandCapture(pnpmPath, ["config", "get", "global-bin-dir"]), !gbin.isEmpty {
+                ownedDirs.insert(gbin)
+            }
+            if !pkgs.isEmpty, let r = root {
+                let children = pkgs.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (r as NSString).appendingPathComponent($0.0)) }
+                toolNodes.append(displayParent(name: "pnpm", label: "pnpm (global)", icon: "shippingbox.fill", color: .teal, children: children, finderPath: r))
+            }
+        }
+
+        // --- Yarn (global) ---
+        if let yarnPath = locateBinary("yarn", in: dirs) {
+            var root: String?
+            var pkgs: [(String, Int64)] = []
+            if let gdir = runCommandCapture(yarnPath, ["global", "dir"]) {
+                let r = (gdir as NSString).appendingPathComponent("node_modules")
+                root = r
+                pkgs = sizedPackages(in: r)
+            }
+            if let gbin = runCommandCapture(yarnPath, ["global", "bin"]) {
+                ownedDirs.insert(gbin)
+            }
+            if !pkgs.isEmpty, let r = root {
+                let children = pkgs.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (r as NSString).appendingPathComponent($0.0)) }
+                toolNodes.append(displayParent(name: "Yarn", label: "Yarn (global)", icon: "shippingbox.fill", color: .blue, children: children, finderPath: r))
+            }
+        }
+
+        // --- Cargo (user-installed crates; size = sum of the binaries each crate installed) ---
+        if let cargoPath = locateBinary("cargo", in: dirs) {
+            let cargoBin = (cargoPath as NSString).deletingLastPathComponent
+            var crates: [(String, Int64)] = []
+            if let out = runCommandCapture(cargoPath, ["install", "--list"]) {
+                let headerRegex = try? NSRegularExpression(pattern: "^(\\S+) v[\\d.]+:")
+                var currentName: String?
+                var currentBins: [String] = []
+                func flush() {
+                    guard let n = currentName else { return }
+                    var size: Int64 = 0
+                    for b in currentBins {
+                        size += calculateDirectorySize(at: (cargoBin as NSString).appendingPathComponent(b), isDirectory: false)
+                    }
+                    crates.append((n, size))
+                    currentName = nil
+                    currentBins = []
+                }
+                for raw in out.split(separator: "\n") {
+                    let line = String(raw)
+                    let range = NSRange(line.startIndex..., in: line)
+                    if let m = headerRegex?.firstMatch(in: line, options: [], range: range),
+                       let r = Range(m.range(at: 1), in: line) {
+                        flush()
+                        currentName = String(line[r])
+                    } else if line.first?.isWhitespace == true {
+                        let bin = line.trimmingCharacters(in: .whitespaces)
+                        if !bin.isEmpty { currentBins.append(bin) }
+                    }
+                }
+                flush()
+            }
+            ownedDirs.insert(cargoBin)
+            if !crates.isEmpty {
+                let children = crates.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: cargoBin) }
+                toolNodes.append(displayParent(name: "Cargo", label: "Cargo", icon: "hammer.fill", color: .orange, children: children, finderPath: cargoBin))
+            }
+        }
+
+        // --- Ruby gems (size each installed gem dir across all GEM PATHS) ---
+        if let gemPath = locateBinary("gem", in: dirs) {
+            let gpaths = gemPaths(gemPath: gemPath)
+            var gemSizes: [String: Int64] = [:]
+            var gemLoc: [String: String] = [:]
+            for gp in gpaths {
+                let gemsDir = (gp as NSString).appendingPathComponent("gems")
+                guard let entries = try? fm.contentsOfDirectory(atPath: gemsDir) else { continue }
+                for entry in entries {
+                    guard let name = gemName(from: entry) else { continue }
+                    let dir = (gemsDir as NSString).appendingPathComponent(entry)
+                    let size = calculateDirectorySize(at: dir, isDirectory: true)
+                    gemSizes[name, default: 0] += size
+                    if gemLoc[name] == nil { gemLoc[name] = dir }
+                }
+            }
+            if !gemSizes.isEmpty {
+                let children = gemSizes.map { leaf($0.key, $0.value, finderPath: gemLoc[$0.key]) }.sorted { $0.sizeBytes > $1.sizeBytes }
+                toolNodes.append(displayParent(name: "Ruby Gems", label: "Ruby Gems", icon: "diamond.fill", color: .red, children: children, finderPath: gpaths.first))
+            }
+        }
+
+        // --- Go (GOPATH/bin tools) ---
+        if let goPath = locateBinary("go", in: dirs) {
+            var tools: [(String, Int64)] = []
+            var goBin: String?
+            if let gopath = runCommandCapture(goPath, ["env", "GOPATH"]), !gopath.isEmpty {
+                let resolved = gopath.hasPrefix("~/")
+                    ? (home as NSString).appendingPathComponent(String(gopath.dropFirst(2)))
+                    : gopath
+                let bin = (resolved as NSString).appendingPathComponent("bin")
+                for name in binariesInDir(bin) {
+                    let size = calculateDirectorySize(at: (bin as NSString).appendingPathComponent(name), isDirectory: false)
+                    tools.append((name, size))
+                }
+                ownedDirs.insert(bin)
+                goBin = bin
+            }
+            if !tools.isEmpty, let bin = goBin {
+                let children = tools.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (bin as NSString).appendingPathComponent($0.0)) }
+                toolNodes.append(displayParent(name: "Go", label: "Go", icon: "shippingbox.fill", color: .cyan, children: children, finderPath: bin))
+            }
+        }
+
+        // --- Pipx ---
+        if let pipxPath = locateBinary("pipx", in: dirs) {
+            var pipxHome = ""
+            if let env = runCommandCapture(pipxPath, ["environment"]) {
+                for raw in env.split(separator: "\n") {
+                    let s = String(raw).trimmingCharacters(in: .whitespaces)
+                    if s.hasPrefix("PIPX_HOME"), let eq = s.firstIndex(of: "=") {
+                        var val = String(s[s.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+                        val = val.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+                        pipxHome = val
+                    }
+                }
+            }
+            if pipxHome.isEmpty {
+                pipxHome = (home as NSString).appendingPathComponent(".local/pipx")
+            }
+            let venvsDir = (pipxHome as NSString).appendingPathComponent("venvs")
+            var apps: [(String, Int64)] = []
+            if let out = runCommandCapture(pipxPath, ["list", "--short"]) {
+                for name in trimLines(out) {
+                    let size = calculateDirectorySize(at: (venvsDir as NSString).appendingPathComponent(name), isDirectory: true)
+                    apps.append((name, size))
+                }
+            }
+            if !apps.isEmpty {
+                let children = apps.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (venvsDir as NSString).appendingPathComponent($0.0)) }
+                toolNodes.append(displayParent(name: "Pipx", label: "Pipx", icon: "shippingbox.fill", color: .indigo, children: children, finderPath: venvsDir))
+            }
+        }
+
+        // --- Other non-system PATH tools (dirs not owned by a manager above) ---
+        var otherNodes: [CategoryItem] = []
+        for dir in dirs where !ownedDirs.contains(dir) {
+            var bins: [(String, Int64)] = []
+            for name in binariesInDir(dir) {
+                let size = calculateDirectorySize(at: (dir as NSString).appendingPathComponent(name), isDirectory: false)
+                bins.append((name, size))
+            }
+            if bins.isEmpty { continue }
+            let display = dir.hasPrefix(home) ? "~" + dir.dropFirst(home.count) : dir
+            let children = bins.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (dir as NSString).appendingPathComponent($0.0)) }
+            otherNodes.append(displayParent(name: dir, label: display, icon: "folder.fill", color: .gray, children: children, finderPath: dir))
+        }
+        if !otherNodes.isEmpty {
+            otherNodes.sort { $0.sizeBytes > $1.sizeBytes }
+            toolNodes.append(displayParent(name: "Other PATH tools", label: "Other PATH tools", icon: "folder.fill", color: .secondary, children: otherNodes))
+        }
+
+        return displayParent(name: "Installed Tools", label: "Installed Tools", icon: "terminal.fill", color: .secondary, note: "informational only", children: toolNodes)
+    }
+
     // Core deletion for a single item (runs on a background thread)
     private func cleanItem(_ item: CategoryItem) {
         switch item.rule.cleanType {
@@ -889,18 +1415,53 @@ struct ContentView: View {
         return result
     }
 
-    // Clean every selected cleanable item; the user triggers a rescan manually
+    // Clean every selected cleanable item; the user triggers a rescan manually.
+    // After cleaning, the affected leaves are re-measured (now empty/gone -> 0) and
+    // parent totals recomputed, so the table reflects the deletion without a full rescan.
     private func performCleanSelected() {
         let toClean = collectCleanableSelected(from: categories)
         guard !toClean.isEmpty else { return }
+        let cleanedIDs = Set(toClean.map { $0.id })
+        let snapshot = categories
         isCleaning = true
         DispatchQueue.global(qos: .userInitiated).async {
             for item in toClean {
                 self.cleanItem(item)
             }
+            let updated = self.rebuildRemeasuringCleanedLeaves(in: snapshot, cleanedIDs: cleanedIDs)
             DispatchQueue.main.async {
+                self.categories = updated
                 self.isCleaning = false
                 self.selectedIDs = []
+                self.loadRealDiskSpace()
+            }
+        }
+    }
+
+    // Return a copy of the tree where cleaned leaves are re-measured (0 once deleted)
+    // and every parent's size is recomputed from its children.
+    private func rebuildRemeasuringCleanedLeaves(in items: [CategoryItem], cleanedIDs: Set<UUID>) -> [CategoryItem] {
+        items.map { item in
+            if let children = item.children, !children.isEmpty {
+                let newChildren = rebuildRemeasuringCleanedLeaves(in: children, cleanedIDs: cleanedIDs)
+                var rebuilt = item
+                rebuilt.children = newChildren
+                let total = newChildren.reduce(Int64(0)) { $0 + $1.sizeBytes }
+                rebuilt.sizeBytes = total
+                rebuilt.sizeString = total > 0 ? formatBytes(total) : ""
+                return rebuilt
+            } else if cleanedIDs.contains(item.id) {
+                let expanded = NSString(string: item.pathDescription).expandingTildeInPath
+                var isDir: ObjCBool = false
+                let newSize: Int64 = FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir)
+                    ? calculateDirectorySize(at: expanded, isDirectory: isDir.boolValue)
+                    : 0
+                var rebuilt = item
+                rebuilt.sizeBytes = newSize
+                rebuilt.sizeString = newSize > 0 ? formatBytes(newSize) : ""
+                return rebuilt
+            } else {
+                return item
             }
         }
     }
@@ -1005,17 +1566,29 @@ struct ContentView: View {
     }
 
     private func formatBytes(_ bytes: Int64) -> String {
+        if bytes == 0 { return "0 KB" }
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useGB, .useTB, .useMB]
         formatter.countStyle = .file
-        return formatter.string(fromByteCount: bytes)
+        var result = formatter.string(fromByteCount: bytes)
+        if result == "Zero KB" {
+            result = "0 KB"
+        }
+        return result
     }
 
-    // Open directory in Finder
+    // Open a directory in Finder, or reveal a file / .app bundle (without launching it).
     private func openInFinder(pathDescription: String) {
         let expandedPath = NSString(string: pathDescription).expandingTildeInPath
         let url = URL(fileURLWithPath: expandedPath)
-        NSWorkspace.shared.open(url)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: expandedPath, isDirectory: &isDir) else { return }
+        if expandedPath.hasSuffix(".app") || !isDir.boolValue {
+            // Reveal files / app bundles in Finder instead of launching them
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } else {
+            NSWorkspace.shared.open(url)
+        }
     }
 }
 
