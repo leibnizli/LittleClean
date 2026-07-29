@@ -17,7 +17,7 @@ struct CategoryItem: Identifiable {
     var finderPath: String? = nil
     // Override label shown in the Path column (used to show ancestor context in search results)
     var displayPath: String? = nil
-    // Short description shown in the "说明" column (what this dir/tool is)
+    // Short description shown in the "Note" column (what this dir/tool is)
     var description: String? = nil
 }
 
@@ -118,7 +118,7 @@ struct ContentView: View {
                 }
             }
             
-            TableColumn("说明") { item in
+            TableColumn("Note") { item in
                 Text(item.description ?? item.rule.note ?? "")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
@@ -217,7 +217,7 @@ struct ContentView: View {
                 if isLoadingDetails {
                     ProgressView()
                         .controlSize(.small)
-                    Text("扫描主目录…")
+                    Text("Scanning Home…")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -247,7 +247,7 @@ struct ContentView: View {
             .buttonStyle(.borderedProminent)
 
             if !selectedIDs.isEmpty {
-                Text("已选 \(formatBytes(selectedTotalBytes))")
+                Text("Selected \(formatBytes(selectedTotalBytes))")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
             }
@@ -313,12 +313,25 @@ struct ContentView: View {
                 } else if rule.isDynamicLeftoversRule {
                     let leftoverItems = self.scanAppLeftovers(basePath: rule.pathDescription)
                     foundCategories.append(contentsOf: leftoverItems)
-                } else if rule.isDynamicHomeCacheRule {
-                    let cacheItems = self.scanHomeCaches(basePath: rule.pathDescription)
-                    foundCategories.append(contentsOf: cacheItems)
-                } else if rule.isDynamicHomeLeftoversRule {
-                    let homeItems = self.scanHomeLeftovers(basePath: rule.pathDescription)
-                    foundCategories.append(contentsOf: homeItems)
+                } else if rule.isDynamicHomeCleanupRule {
+                    var allChildren: [CategoryItem] = []
+                    allChildren.append(contentsOf: self.scanHomeCaches(basePath: rule.pathDescription))
+                    allChildren.append(contentsOf: self.scanHomeLeftovers(basePath: rule.pathDescription))
+                    
+                    if !allChildren.isEmpty {
+                        let totalBytes = allChildren.reduce(0) { $0 + $1.sizeBytes }
+                        let parent = CategoryItem(
+                            name: rule.name,
+                            pathDescription: rule.pathDescription,
+                            iconName: rule.iconName,
+                            iconColor: rule.iconColor,
+                            sizeBytes: totalBytes,
+                            sizeString: formatBytes(totalBytes),
+                            rule: rule,
+                            children: allChildren
+                        )
+                        foundCategories.append(parent)
+                    }
                 } else if fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) {
                     let totalBytes = calculateDirectorySize(at: expandedPath, isDirectory: isDirectory.boolValue)
                     let sizeStr = formatBytes(totalBytes)
@@ -424,7 +437,7 @@ struct ContentView: View {
             iconName: "exclamationmark.triangle.fill",
             iconColor: .orange,
             cleanType: .none,
-            note: "\(versionGroups.keys.count)个版本"
+            note: "\(versionGroups.keys.count) Versions"
         )
 
         let item = CategoryItem(
@@ -516,7 +529,7 @@ struct ContentView: View {
                     iconName: "iphone.slash",
                     iconColor: .red,
                     cleanType: .runCommand(executable: "/usr/bin/xcrun", args: ["simctl", "delete", udid]),
-                    note: "不可用"
+                    note: "Unavailable"
                 )
                 let item = CategoryItem(
                     name: deviceName,
@@ -541,7 +554,7 @@ struct ContentView: View {
             iconName: "iphone.slash",
             iconColor: .red,
             cleanType: .none,
-            note: "运行时缺失"
+            note: "Missing Runtime"
         )
         let parent = CategoryItem(
             name: parentRule.name,
@@ -621,7 +634,7 @@ struct ContentView: View {
                 if item.hasSuffix(".app") {
                     let appBundleURL = URL(fileURLWithPath: dir).appendingPathComponent(item)
 
-                    // 1. Finder Display Name (e.g., "微信开发者工具")
+                    // 1. Finder Display Name (e.g., "WeChat DevTools")
                     let finderDisplayName = fileManager.displayName(atPath: appBundleURL.path)
                     let cleanFinderName = (finderDisplayName as NSString).deletingPathExtension.lowercased()
                     identifiers.insert(cleanFinderName)
@@ -709,36 +722,36 @@ struct ContentView: View {
     // Short (<= ~10 char) descriptions for common home-directory entries whose raw name
     // doesn't say what they are. Looked up by lowercased entry name; unknown entries get none.
     private static let homeEntryDescriptions: [String: String] = [
-        ".ollama": "本地大模型", ".docker": "Docker配置", ".colima": "Docker运行时",
-        ".orbstack": "Docker运行时", ".lima": "Docker运行时", ".minikube": "K8s本地",
-        ".cargo": "Rust包", ".rustup": "Rust工具链", ".gradle": "Gradle构建",
-        ".m2": "Maven仓库", ".ivy2": "Ivy仓库", ".npm": "npm缓存", ".pnpm-store": "pnpm缓存",
-        ".pnpm-state": "pnpm缓存", ".yarn": "Yarn缓存", ".bun": "Bun运行时", ".deno": "Deno缓存",
-        ".node-gyp": "编译缓存", ".node": "Node数据", ".nvm": "Node版本", ".fnm": "Node版本",
-        ".volta": "Node版本", ".asdf": "版本管理", ".pyenv": "Python版本", ".sdkman": "Java版本",
-        ".cocoapods": "iOS依赖", ".flutter": "Flutter配置", ".dart": "Dart SDK",
-        ".android": "安卓SDK", ".aws": "AWS配置", ".kube": "K8s配置", ".ssh": "SSH密钥",
-        ".gnupg": "GPG密钥", ".config": "配置文件", ".cache": "通用缓存", ".local": "用户数据",
-        ".gem": "Ruby宝石", ".bundle": "Ruby依赖", ".fastlane": "iOS自动化", ".expo": "RN工具",
-        ".cmake": "CMake", ".conan": "C++依赖", ".ipython": "Python交互", ".jupyter": "Jupyter",
-        ".matplotlib": "绘图缓存", ".helm": "Helm", ".terraform.d": "Terraform",
-        ".vagrant.d": "Vagrant", ".putty": "PuTTY", ".cups": "打印配置", ".vscode": "VSCode配置",
-        ".cursor": "Cursor配置", ".windsurf": "Windsurf", ".fleet": "Fleet编辑器",
-        ".claude": "Claude配置", ".cline": "Cline配置", ".copilot": "Copilot配置",
-        ".codeium": "Codeium配置", ".gemini": "Gemini配置", ".chatgpt": "ChatGPT配置",
-        ".zshrc": "zsh配置", ".zshenv": "zsh配置", ".zprofile": "zsh配置",
-        ".bashrc": "bash配置", ".bash_profile": "bash配置", ".profile": "Shell配置",
-        ".gitconfig": "Git配置", ".gitignore_global": "Git忽略", ".npmrc": "npm配置",
-        ".yarnrc": "Yarn配置", ".vimrc": "Vim配置", ".vim": "Vim配置",
-        ".zsh_history": "命令历史", ".bash_history": "命令历史", ".mysql_history": "MySQL历史",
-        ".python_history": "Python历史", ".node_repl_history": "Node历史",
-        ".swiftpm": "Swift包", ".switchhosts": "Hosts管理", ".shadowsocksx-ng": "代理工具",
-        ".mitmproxy": "抓包工具", ".termora": "终端工具", ".harmony": "鸿蒙开发",
-        ".ohos": "鸿蒙开发", ".ohpm": "鸿蒙包", ".hvigor": "鸿蒙构建", ".aliyun": "阿里云CLI",
-        "flutter": "Flutter SDK", "venvs": "Python虚拟环境", "androidstudioprojects": "安卓项目",
-        "wechatprojects": "微信项目", "codegeexprojects": "CodeGeeX项目",
-        "writersideprojects": "Writerside项目", "postman": "API测试", "plugins": "插件",
-        "creative cloud files": "Adobe云文件", "yarn.lock": "依赖锁定"
+        ".ollama": "Local LLM", ".docker": "Docker Config", ".colima": "Docker Runtime",
+        ".orbstack": "Docker Runtime", ".lima": "Docker Runtime", ".minikube": "Local K8s",
+        ".cargo": "Rust Packages", ".rustup": "Rust Toolchain", ".gradle": "Gradle Build",
+        ".m2": "Maven Repository", ".ivy2": "Ivy Repository", ".npm": "npm Cache", ".pnpm-store": "pnpm Cache",
+        ".pnpm-state": "pnpm Cache", ".yarn": "Yarn Cache", ".bun": "Bun Runtime", ".deno": "Deno Cache",
+        ".node-gyp": "Build Cache", ".node": "Node Data", ".nvm": "Node Version", ".fnm": "Node Version",
+        ".volta": "Node Version", ".asdf": "Version Manager", ".pyenv": "Python Version", ".sdkman": "Java Version",
+        ".cocoapods": "iOS Dependencies", ".flutter": "Flutter Config", ".dart": "Dart SDK",
+        ".android": "Android SDK", ".aws": "AWS Config", ".kube": "K8s Config", ".ssh": "SSH Keys",
+        ".gnupg": "GPG Keys", ".config": "Config Files", ".cache": "General Cache", ".local": "User Data",
+        ".gem": "Ruby Gems", ".bundle": "Ruby Dependencies", ".fastlane": "iOS Automation", ".expo": "RN Tools",
+        ".cmake": "CMake", ".conan": "C++ Dependencies", ".ipython": "Python Interactive", ".jupyter": "Jupyter",
+        ".matplotlib": "Plot Cache", ".helm": "Helm", ".terraform.d": "Terraform",
+        ".vagrant.d": "Vagrant", ".putty": "PuTTY", ".cups": "Print Config", ".vscode": "VSCode Config",
+        ".cursor": "Cursor Config", ".windsurf": "Windsurf", ".fleet": "Fleet Editor",
+        ".claude": "Claude Config", ".cline": "Cline Config", ".copilot": "Copilot Config",
+        ".codeium": "Codeium Config", ".gemini": "Gemini Config", ".chatgpt": "ChatGPT Config",
+        ".zshrc": "zsh Config", ".zshenv": "zsh Config", ".zprofile": "zsh Config",
+        ".bashrc": "bash Config", ".bash_profile": "bash Config", ".profile": "Shell Config",
+        ".gitconfig": "Git Config", ".gitignore_global": "Git Ignore", ".npmrc": "npm Config",
+        ".yarnrc": "Yarn Config", ".vimrc": "Vim Config", ".vim": "Vim Config",
+        ".zsh_history": "Command History", ".bash_history": "Command History", ".mysql_history": "MySQL History",
+        ".python_history": "Python History", ".node_repl_history": "Node History",
+        ".swiftpm": "Swift Packages", ".switchhosts": "Hosts Manager", ".shadowsocksx-ng": "Proxy Tool",
+        ".mitmproxy": "Packet Sniffer", ".termora": "Terminal Tool", ".harmony": "HarmonyOS Dev",
+        ".ohos": "HarmonyOS Dev", ".ohpm": "HarmonyOS Packages", ".hvigor": "HarmonyOS Build", ".aliyun": "Aliyun CLI",
+        "flutter": "Flutter SDK", "venvs": "Python Venvs", "androidstudioprojects": "Android Projects",
+        "wechatprojects": "WeChat Projects", "codegeexprojects": "CodeGeeX Projects",
+        "writersideprojects": "Writerside Projects", "postman": "API Testing", "plugins": "Plugins",
+        "creative cloud files": "Adobe Cloud Files", "yarn.lock": "Dependency Lock"
     ]
 
     // Dynamically scan for folders in Application Support that belong to UNINSTALLED applications
@@ -824,7 +837,7 @@ struct ContentView: View {
             iconName: "folder.badge.minus",
             iconColor: .pink,
             cleanType: .none,
-            note: "应用残留"
+            note: "App Leftovers"
         )
 
         let parentItem = CategoryItem(
@@ -895,27 +908,7 @@ struct ContentView: View {
             childItems.append(item)
         }
 
-        guard !childItems.isEmpty else { return [] }
-
-        let parentRule = CleanRule(
-            name: "Home Tool Caches",
-            pathDescription: basePath,
-            iconName: "shippingbox.fill",
-            iconColor: .orange,
-            cleanType: .none,
-            note: "工具缓存"
-        )
-        let parent = CategoryItem(
-            name: parentRule.name,
-            pathDescription: parentRule.pathDescription,
-            iconName: parentRule.iconName,
-            iconColor: parentRule.iconColor,
-            sizeBytes: totalBytes,
-            sizeString: formatBytes(totalBytes),
-            rule: parentRule,
-            children: childItems
-        )
-        return [parent]
+        return childItems
     }
 
     // Scan the home directory for dotfolders left behind by uninstalled apps/tools
@@ -989,29 +982,8 @@ struct ContentView: View {
             childItems.append(item)
         }
 
-        guard !childItems.isEmpty else { return [] }
-
         childItems.sort { $0.name.lowercased() < $1.name.lowercased() }
-
-        let parentRule = CleanRule(
-            name: "Home Directory Leftovers",
-            pathDescription: basePath,
-            iconName: "folder.badge.minus",
-            iconColor: .pink,
-            cleanType: .none,
-            note: "目录残留"
-        )
-        let parent = CategoryItem(
-            name: parentRule.name,
-            pathDescription: parentRule.pathDescription,
-            iconName: parentRule.iconName,
-            iconColor: parentRule.iconColor,
-            sizeBytes: totalBytes,
-            sizeString: formatBytes(totalBytes),
-            rule: parentRule,
-            children: childItems
-        )
-        return [parent]
+        return childItems
     }
 
     // MARK: - Installed Tools (read-only informational section)
@@ -1326,7 +1298,7 @@ struct ContentView: View {
             ownedDirs.insert((prefix as NSString).appendingPathComponent("bin"))
             let displayLabel = "\(label)  (\(pkgs.count))"
             if pkgs.isEmpty {
-                installNodes.append(displayItem(name: label, label: displayLabel, icon: "shippingbox.fill", color: .green, note: "无全局包", finderPath: nm.isEmpty ? nil : nm))
+                installNodes.append(displayItem(name: label, label: displayLabel, icon: "shippingbox.fill", color: .green, note: "No Global Packages", finderPath: nm.isEmpty ? nil : nm))
             } else {
                 let children = pkgs.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (nm as NSString).appendingPathComponent($0.0)) }
                 installNodes.append(displayParent(name: label, label: displayLabel, icon: "shippingbox.fill", color: .green, children: children, finderPath: nm))
@@ -1614,7 +1586,7 @@ struct ContentView: View {
         // section (e.g. ~/.cargo, ~/go, ~/.nvm) so the same data isn't shown twice.
         let coveredPaths = homeDirectoryEntryPaths()
         let filteredToolNodes = filterHomeCoveredNodes(toolNodes, coveredPaths: coveredPaths)
-        return displayParent(name: "Installed Tools", label: "Installed Tools", icon: "terminal.fill", color: .secondary, note: "仅浏览", children: filteredToolNodes)
+        return displayParent(name: "Installed Tools", label: "Installed Tools", icon: "terminal.fill", color: .secondary, note: "Read Only", children: filteredToolNodes)
     }
 
     // Enumerate every non-system entry (file or folder, hidden or visible) directly under the
@@ -1636,7 +1608,7 @@ struct ContentView: View {
         if fm.fileExists(atPath: dockerPath, isDirectory: &dockerIsDir), dockerIsDir.boolValue {
             let bytes = calculateDirectorySize(at: dockerPath, isDirectory: true)
             if bytes > 0 {
-                childItems.append(displayItem(name: "Docker", label: "Docker", icon: "cube.fill", color: .blue, sizeBytes: bytes, finderPath: dockerPath, description: "Docker数据"))
+                childItems.append(displayItem(name: "Docker", label: "Docker", icon: "cube.fill", color: .blue, sizeBytes: bytes, finderPath: dockerPath, description: "Docker Data"))
             }
         }
 
@@ -1663,7 +1635,7 @@ struct ContentView: View {
         guard !childItems.isEmpty else { return nil }
         childItems.sort { $0.sizeBytes > $1.sizeBytes }
 
-        return displayParent(name: "Home Directory", label: "Home Directory", icon: "house.fill", color: .secondary, note: "非系统项", children: childItems)
+        return displayParent(name: "Home Directory", label: "Home Directory", icon: "house.fill", color: .secondary, note: "Non-system Items", children: childItems)
     }
 
     // Mirror of scanAppLeftovers, but lists Application Support folders that belong to
@@ -1715,7 +1687,7 @@ struct ContentView: View {
         guard !childItems.isEmpty else { return nil }
         childItems.sort { $0.sizeBytes > $1.sizeBytes }
 
-        return displayParent(name: "Installed App Data", label: basePath, icon: "folder.fill", color: .blue, note: "应用数据", children: childItems, finderPath: expandedBasePath)
+        return displayParent(name: "Installed App Data", label: basePath, icon: "folder.fill", color: .blue, note: "App Data", children: childItems, finderPath: expandedBasePath)
     }
 
     // Core deletion for a single item (runs on a background thread)

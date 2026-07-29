@@ -18,8 +18,7 @@ struct CleanRule: Identifiable {
     var note: String? = nil
     var isDynamicSimulatorRule: Bool = false
     var isDynamicLeftoversRule: Bool = false
-    var isDynamicHomeCacheRule: Bool = false
-    var isDynamicHomeLeftoversRule: Bool = false
+    var isDynamicHomeCleanupRule: Bool = false
     var isDynamicUnavailableSimulatorRule: Bool = false
 }
 
@@ -54,18 +53,12 @@ struct CleanConfig {
         ),
         CleanRule(name: "Saved App State", pathDescription: "~/Library/Saved Application State", iconName: "clock.arrow.circlepath", iconColor: .mint),
         CleanRule(
-            name: "Home Tool Caches",
+            name: "Home Directory Cleanup",
             pathDescription: "~",
-            iconName: "shippingbox.fill",
-            iconColor: .orange,
-            isDynamicHomeCacheRule: true
-        ),
-        CleanRule(
-            name: "Home Directory Leftovers",
-            pathDescription: "~",
-            iconName: "folder.badge.minus",
-            iconColor: .pink,
-            isDynamicHomeLeftoversRule: true
+            iconName: "house.fill",
+            iconColor: .indigo,
+            note: "Home Cleanup",
+            isDynamicHomeCleanupRule: true
         )
     ]
 }
