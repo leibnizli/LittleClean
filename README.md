@@ -8,7 +8,7 @@ DeepClean is a powerful and intelligent macOS cleaner and developer tool manager
 
 ## Installation
 
-You can download the latest pre-compiled version from the [Releases](https://github.com/leibnizli/DeepClean/releases) page.
+You can download the latest pre-compiled version from the [Releases](https://github.com/leibnizli/DeepClean/releases) page. (Requires macOS 14 or later)
 
 Alternatively, you can clone the repository and build via Xcode.
 

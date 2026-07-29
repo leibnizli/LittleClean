@@ -8,7 +8,7 @@ DeepClean 是一款强大而智能的 macOS 系统清理及开发者工具管理
 
 ## 安装与运行
 
-您可以从 [Releases](https://github.com/leibnizli/DeepClean/releases) 页面下载最新编译好的版本。
+您可以从 [Releases](https://github.com/leibnizli/DeepClean/releases) 页面下载最新编译好的版本。（最低支持 macOS 14）
 
 或者，您也可以克隆仓库后使用 Xcode 编译并运行。
 

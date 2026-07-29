@@ -96,7 +96,7 @@ struct ContentView: View {
         Table(displayedCategories, children: \.children, sortOrder: $sortOrder) {
             TableColumn("Path", value: \.pathDescription) { item in
                 HStack(alignment: .center, spacing: 6) {
-                    if item.isDisplayOnly {
+                    if item.isDisplayOnly || item.rule.isCheckboxHidden {
                         Image(systemName: item.iconName)
                             .foregroundColor(item.iconColor)
                             .frame(width: 16)
@@ -320,7 +320,7 @@ struct ContentView: View {
                     
                     if !allChildren.isEmpty {
                         let totalBytes = allChildren.reduce(0) { $0 + $1.sizeBytes }
-                        let parent = CategoryItem(
+                        var parent = CategoryItem(
                             name: rule.name,
                             pathDescription: rule.pathDescription,
                             iconName: rule.iconName,
@@ -330,6 +330,7 @@ struct ContentView: View {
                             rule: rule,
                             children: allChildren
                         )
+                        parent.displayPath = "~ (Caches & Leftovers)"
                         foundCategories.append(parent)
                     }
                 } else if fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) {
@@ -810,7 +811,8 @@ struct ContentView: View {
                         pathDescription: displayPath,
                         iconName: "folder.badge.minus",
                         iconColor: .pink,
-                        cleanType: .deleteDirectoryTree
+                        cleanType: .deleteDirectoryTree,
+                        note: "App Leftovers"
                     )
 
                     let childItem = CategoryItem(
@@ -894,7 +896,8 @@ struct ContentView: View {
                 pathDescription: displayPath,
                 iconName: cache.icon,
                 iconColor: cache.color,
-                cleanType: .deleteDirectory
+                cleanType: .deleteDirectory,
+                note: cache.name
             )
             let item = CategoryItem(
                 name: cache.name,
@@ -964,12 +967,14 @@ struct ContentView: View {
 
             totalBytes += bytes
             let displayPath = "~/\(entry)"
+            let note = Self.homeEntryDescriptions[lower] ?? Self.homeEntryDescriptions[normalized] ?? "App Leftovers"
             let rule = CleanRule(
                 name: entry,
                 pathDescription: displayPath,
                 iconName: "folder.badge.minus",
                 iconColor: .pink,
-                cleanType: .deleteDirectoryTree
+                cleanType: .deleteDirectoryTree,
+                note: note
             )
             let item = CategoryItem(
                 name: entry,

@@ -20,6 +20,7 @@ struct CleanRule: Identifiable {
     var isDynamicLeftoversRule: Bool = false
     var isDynamicHomeCleanupRule: Bool = false
     var isDynamicUnavailableSimulatorRule: Bool = false
+    var isCheckboxHidden: Bool = false
 }
 
 struct CleanConfig {
@@ -55,10 +56,11 @@ struct CleanConfig {
         CleanRule(
             name: "Home Directory Cleanup",
             pathDescription: "~",
-            iconName: "house.fill",
+            iconName: "folder.fill",
             iconColor: .indigo,
             note: "Home Cleanup",
-            isDynamicHomeCleanupRule: true
+            isDynamicHomeCleanupRule: true,
+            isCheckboxHidden: true
         )
     ]
 }
