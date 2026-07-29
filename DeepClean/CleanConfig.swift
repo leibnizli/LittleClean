@@ -20,6 +20,7 @@ struct CleanRule: Identifiable {
     var isDynamicLeftoversRule: Bool = false
     var isDynamicHomeCleanupRule: Bool = false
     var isDynamicUnavailableSimulatorRule: Bool = false
+    var isDynamicContainerLeftoversRule: Bool = false
     var isCheckboxHidden: Bool = false
 }
 
@@ -51,6 +52,13 @@ struct CleanConfig {
             iconName: "folder.badge.minus",
             iconColor: .pink,
             isDynamicLeftoversRule: true
+        ),
+        CleanRule(
+            name: "Container Leftovers",
+            pathDescription: "~/Library/Containers",
+            iconName: "shippingbox.fill",
+            iconColor: .pink,
+            isDynamicContainerLeftoversRule: true
         ),
         CleanRule(name: "Saved App State", pathDescription: "~/Library/Saved Application State", iconName: "clock.arrow.circlepath", iconColor: .mint, note: "Saved App State"),
         CleanRule(

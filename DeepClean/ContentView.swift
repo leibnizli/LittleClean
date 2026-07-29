@@ -346,6 +346,9 @@ struct ContentView: View {
                 } else if rule.isDynamicLeftoversRule {
                     let leftoverItems = self.scanAppLeftovers(basePath: rule.pathDescription)
                     foundCategories.append(contentsOf: leftoverItems)
+                } else if rule.isDynamicContainerLeftoversRule {
+                    let containerItems = self.scanContainerLeftovers(basePath: rule.pathDescription)
+                    foundCategories.append(contentsOf: containerItems)
                 } else if rule.isDynamicHomeCleanupRule {
                     var allChildren: [CategoryItem] = []
                     allChildren.append(contentsOf: self.scanHomeCaches(basePath: rule.pathDescription))
@@ -981,6 +984,109 @@ struct ContentView: View {
             iconColor: .pink,
             cleanType: .none,
             note: "App Leftovers"
+        )
+
+        let parentItem = CategoryItem(
+            name: parentRule.name,
+            pathDescription: parentRule.pathDescription,
+            iconName: parentRule.iconName,
+            iconColor: parentRule.iconColor,
+            sizeBytes: totalBytes,
+            sizeString: formatBytes(totalBytes),
+            rule: parentRule,
+            children: childItems
+        )
+
+        return [parentItem]
+    }
+
+    // Dynamically scan ~/Library/Containers for sandbox containers whose owning
+    // application is no longer installed. Unlike Application Support (folders named
+    // by app display name), container directories are named by bundle id -- or by a
+    // UUID, in which case the real owning bundle id lives in each container's
+    // .com.apple.containermanagerd.metadata.plist (MCMMetadataIdentifier). That
+    // plist is read so UUID-named containers resolve correctly. com.apple.* system
+    // containers are always skipped. Remaining containers whose bundle id matches
+    // no installed app (or its extensions) are listed as cleanable leftovers.
+    private func scanContainerLeftovers(basePath: String) -> [CategoryItem] {
+        let expandedBasePath = NSString(string: basePath).expandingTildeInPath
+        let fileManager = FileManager.default
+        guard let entries = try? fileManager.contentsOfDirectory(atPath: expandedBasePath) else {
+            return []
+        }
+
+        let installedApps = fetchInstalledAppIdentifiers()
+
+        var childItems: [CategoryItem] = []
+        var totalBytes: Int64 = 0
+
+        for entry in entries {
+            let fullPath = (expandedBasePath as NSString).appendingPathComponent(entry)
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue else { continue }
+
+            // Resolve the owning bundle id from the container manager metadata plist,
+            // falling back to the folder name. UUID-named containers rely on the plist.
+            let metadataPlist = (fullPath as NSString).appendingPathComponent(".com.apple.containermanagerd.metadata.plist")
+            var bundleID = entry
+            if let data = try? Data(contentsOf: URL(fileURLWithPath: metadataPlist)),
+               let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+               let identifier = plist["MCMMetadataIdentifier"] as? String,
+               !identifier.isEmpty {
+                bundleID = identifier
+            }
+
+            let lowerBundle = bundleID.lowercased()
+
+            // Skip macOS system containers (system services, daemons, built-in apps).
+            if lowerBundle.hasPrefix("com.apple.") { continue }
+
+            // Skip containers whose owning app -- or one of its extensions -- is still
+            // installed. Extension containers (e.g. "com.foo.app.ShareExtension") and
+            // team-id-prefixed containers match via substring against the app bundle id.
+            let normalizedBundle = normalizeString(bundleID)
+            if folderMatchesInstalledApp(bundleID, lowerFolder: lowerBundle, normalizedFolder: normalizedBundle, installedApps: installedApps) {
+                continue
+            }
+
+            let sizeBytes = calculateDirectorySize(at: fullPath, isDirectory: true)
+            // Only list leftover containers taking space (> 500 KB), matching app leftovers.
+            if sizeBytes > 500_000 {
+                totalBytes += sizeBytes
+                let displayPath = "\(basePath)/\(entry)"
+                let childRule = CleanRule(
+                    name: entry,
+                    pathDescription: displayPath,
+                    iconName: "shippingbox.fill",
+                    iconColor: .pink,
+                    cleanType: .deleteDirectoryTree,
+                    note: "Container Leftover"
+                )
+
+                let childItem = CategoryItem(
+                    name: childRule.name,
+                    pathDescription: childRule.pathDescription,
+                    iconName: childRule.iconName,
+                    iconColor: childRule.iconColor,
+                    sizeBytes: sizeBytes,
+                    sizeString: formatBytes(sizeBytes),
+                    rule: childRule
+                )
+                childItems.append(childItem)
+            }
+        }
+
+        guard !childItems.isEmpty else { return [] }
+
+        childItems.sort { $0.sizeBytes > $1.sizeBytes }
+
+        let parentRule = CleanRule(
+            name: "Container Leftovers",
+            pathDescription: basePath,
+            iconName: "shippingbox.fill",
+            iconColor: .pink,
+            cleanType: .none,
+            note: "Container Leftover"
         )
 
         let parentItem = CategoryItem(
