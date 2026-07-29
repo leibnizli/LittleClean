@@ -754,6 +754,7 @@ nonisolated struct FileSystemScanner: Sendable {
         let knownCaches: [(name: String, subpath: String, icon: String, color: Color)] = [
             ("XDG Cache", ".cache", "shippingbox.fill", .orange),
             ("Gradle Cache", ".gradle/caches", "hammer.fill", .purple),
+            ("Gradle Wrapper Distributions", ".gradle/wrapper/dists", "hammer.fill", .purple),
             ("npm Cache", ".npm/_cacache", "shippingbox.fill", .red),
             ("npx Cache", ".npm/_npx", "shippingbox.fill", .red),
             ("pnpm Store", ".pnpm-store", "shippingbox.fill", .teal),
@@ -764,7 +765,8 @@ nonisolated struct FileSystemScanner: Sendable {
             ("node-gyp Cache", ".node-gyp", "hammer.fill", .gray),
             ("Deno Cache", ".deno/deps", "shippingbox.fill", .green),
             ("Maven Repository", ".m2/repository", "shippingbox.fill", .indigo),
-            ("Cargo Registry Cache", ".cargo/registry", "shippingbox.fill", .orange)
+            ("Cargo Registry Cache", ".cargo/registry", "shippingbox.fill", .orange),
+            ("Cargo Git Cache", ".cargo/git", "shippingbox.fill", .orange)
         ]
 
         var childItems: [CategoryItem] = []
