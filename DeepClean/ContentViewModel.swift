@@ -160,9 +160,37 @@ final class ContentViewModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self, token == self.detailsLoadToken, !self.isScanning else { return }
                 let existingNames = Set(self.categories.filter(\.isDisplayOnly).map(\.name))
-                let newItems = detailItems.filter { !existingNames.contains($0.name) }
-                if !newItems.isEmpty {
-                    self.categories.append(contentsOf: newItems)
+                for detailItem in detailItems where !existingNames.contains(detailItem.name) {
+                    if detailItem.pathDescription == "~/Library/Application Support",
+                       let index = self.categories.firstIndex(where: {
+                           $0.pathDescription == detailItem.pathDescription && $0.children != nil
+                       }),
+                       let detailChildren = detailItem.children {
+                        let current = self.categories[index]
+                        let children = (current.children ?? []) + detailChildren
+                        let totalBytes = children.reduce(0) { $0 + $1.sizeBytes }
+                        let rule = CleanRule(
+                            name: "Application Support",
+                            pathDescription: detailItem.pathDescription,
+                            iconName: "folder.fill",
+                            iconColor: .blue,
+                            cleanType: .none,
+                            note: "App Data",
+                            isCheckboxHidden: true
+                        )
+                        self.categories[index] = CategoryItem(
+                            name: rule.name,
+                            pathDescription: rule.pathDescription,
+                            iconName: rule.iconName,
+                            iconColor: rule.iconColor,
+                            sizeBytes: totalBytes,
+                            sizeString: formatBytes(totalBytes),
+                            rule: rule,
+                            children: children
+                        )
+                    } else {
+                        self.categories.append(detailItem)
+                    }
                 }
                 self.isLoadingDetails = false
             }
