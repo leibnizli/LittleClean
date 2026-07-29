@@ -17,6 +17,8 @@ struct CategoryItem: Identifiable {
     var finderPath: String? = nil
     // Override label shown in the Path column (used to show ancestor context in search results)
     var displayPath: String? = nil
+    // Short description shown in the "说明" column (what this dir/tool is)
+    var description: String? = nil
 }
 
 private enum SelectionState {
@@ -37,6 +39,8 @@ struct ContentView: View {
     @State private var usedBytes: Int64 = 0
     @State private var isScanning: Bool = false
     @State private var isCleaning: Bool = false
+    // True while the read-only detail sections (Home Directory, etc.) load in the background
+    @State private var isLoadingDetails: Bool = false
     // Token used to invalidate stale "Installed Tools" background loads across rescans
     @State private var toolsLoadToken: Int = 0
 
@@ -56,6 +60,12 @@ struct ContentView: View {
     var usedPercentage: Int {
         guard totalBytes > 0 else { return 0 }
         return Int(Double(usedBytes) / Double(totalBytes) * 100)
+    }
+
+    // Sum of sizes of the currently selected cleanable leaf items. No double-counting:
+    // cleanable leaves are distinct filesystem paths, so the sum is what Clean will free.
+    private var selectedTotalBytes: Int64 {
+        collectCleanableSelected(from: categories).reduce(0) { $0 + $1.sizeBytes }
     }
 
     var body: some View {
@@ -105,13 +115,15 @@ struct ContentView: View {
 
                     Text(item.displayPath ?? item.pathDescription)
                         .font(.system(size: 13))
-                    if let note = item.rule.note {
-                        Text("(\(note))")
-                            .font(.system(size: 13))
-                            .foregroundColor(.orange)
-                    }
                 }
             }
+            
+            TableColumn("说明") { item in
+                Text(item.description ?? item.rule.note ?? "")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+            .width(min: 80, ideal: 110, max: 150)
 
             TableColumn("Size", value: \.sizeBytes) { item in
                 Text(item.sizeString)
@@ -163,7 +175,7 @@ struct ContentView: View {
                     walk(children, ancestors: ancestors + [item.pathDescription])
                 } else {
                     let context = (ancestors + [item.pathDescription]).joined(separator: " / ")
-                    let hay = (item.name + " " + item.pathDescription + " " + context + " " + (item.rule.note ?? "")).lowercased()
+                    let hay = (item.name + " " + item.pathDescription + " " + context + " " + (item.rule.note ?? "") + " " + (item.description ?? "")).lowercased()
                     if hay.contains(q) {
                         var copy = item
                         copy.displayPath = context
@@ -202,6 +214,13 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
+                if isLoadingDetails {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("扫描主目录…")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
                 Button {
                     performScan()
                 } label: {
@@ -226,6 +245,12 @@ struct ContentView: View {
             }
             .disabled(selectedIDs.isEmpty || isScanning || isCleaning)
             .buttonStyle(.borderedProminent)
+
+            if !selectedIDs.isEmpty {
+                Text("已选 \(formatBytes(selectedTotalBytes))")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
 
             Spacer()
 
@@ -268,6 +293,7 @@ struct ContentView: View {
     // Scan configured paths and display existing items with calculated size
     private func performScan() {
         isScanning = true
+        isLoadingDetails = false
         loadRealDiskSpace()
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -314,7 +340,8 @@ struct ContentView: View {
                 self.categories = foundCategories
                 self.selectedIDs = []
                 self.isScanning = false
-                // Phase 2: load the informational "Installed Tools" section in the background
+                // Phase 2: load the read-only informational sections (Installed Tools, Home
+                // Directory, Installed App Data) in the background
                 self.loadInstalledToolsAsync()
             }
         }
@@ -325,15 +352,27 @@ struct ContentView: View {
     private func loadInstalledToolsAsync() {
         toolsLoadToken += 1
         let token = toolsLoadToken
+        isLoadingDetails = true
         DispatchQueue.global(qos: .utility).async {
+            // Build all read-only informational sections off the main thread:
+            // Installed Tools (PATH binaries), Home Directory (non-system items), Installed App Data.
             let toolsItem = self.scanInstalledTools()
+            let homeItem = self.scanHomeDirectory()
+            let appDataItem = self.scanInstalledAppData(basePath: "~/Library/Application Support")
             DispatchQueue.main.async {
                 guard token == self.toolsLoadToken, !self.isScanning else { return }
-                // Avoid duplicates if a load somehow lands twice
-                guard !self.categories.contains(where: { $0.isDisplayOnly && $0.name == "Installed Tools" }) else { return }
-                if toolsItem.children?.isEmpty == false {
-                    self.categories.append(toolsItem)
+                let candidates: [CategoryItem] = [toolsItem] + [homeItem, appDataItem].compactMap { $0 }
+                var toAppend: [CategoryItem] = []
+                for item in candidates {
+                    guard let kids = item.children, !kids.isEmpty else { continue }
+                    // Avoid duplicates if a load somehow lands twice
+                    guard !self.categories.contains(where: { $0.isDisplayOnly && $0.name == item.name }) else { continue }
+                    toAppend.append(item)
                 }
+                if !toAppend.isEmpty {
+                    self.categories.append(contentsOf: toAppend)
+                }
+                self.isLoadingDetails = false
             }
         }
     }
@@ -377,8 +416,6 @@ struct ContentView: View {
             return []
         }
 
-        let sortedVersions = versionGroups.keys.sorted()
-        let versionsSummary = sortedVersions.joined(separator: ", ")
         let totalBytes = versionGroups.values.reduce(0) { $0 + $1.bytes }
 
         let reminderRule = CleanRule(
@@ -387,7 +424,7 @@ struct ContentView: View {
             iconName: "exclamationmark.triangle.fill",
             iconColor: .orange,
             cleanType: .none,
-            note: "Detected \(versionGroups.keys.count) versions (\(versionsSummary)). Please manage or delete unused versions if necessary."
+            note: "\(versionGroups.keys.count)个版本"
         )
 
         let item = CategoryItem(
@@ -447,7 +484,7 @@ struct ContentView: View {
         var childItems: [CategoryItem] = []
         var totalBytes: Int64 = 0
 
-        for (runtime, devices) in devicesByRuntime {
+        for (_, devices) in devicesByRuntime {
             guard let deviceList = devices as? [[String: Any]] else { continue }
             for device in deviceList {
                 // isAvailable may be Bool / String / absent across simctl versions
@@ -471,7 +508,6 @@ struct ContentView: View {
 
                 totalBytes += bytes
                 let deviceName = (device["name"] as? String) ?? udid
-                let runtimeName = parseRuntimeName(runtime)
                 let displayPath = "\(basePath)/\(udid)"
 
                 let rule = CleanRule(
@@ -480,7 +516,7 @@ struct ContentView: View {
                     iconName: "iphone.slash",
                     iconColor: .red,
                     cleanType: .runCommand(executable: "/usr/bin/xcrun", args: ["simctl", "delete", udid]),
-                    note: "\(deviceName) - \(runtimeName)"
+                    note: "不可用"
                 )
                 let item = CategoryItem(
                     name: deviceName,
@@ -505,7 +541,7 @@ struct ContentView: View {
             iconName: "iphone.slash",
             iconColor: .red,
             cleanType: .none,
-            note: "Simulator devices whose runtime is no longer installed"
+            note: "运行时缺失"
         )
         let parent = CategoryItem(
             name: parentRule.name,
@@ -547,6 +583,25 @@ struct ContentView: View {
             }
         }
         return false
+    }
+
+    // True if a folder name (under ~/Library/Application Support or ~) corresponds to a
+    // currently installed application. Shared by the leftovers and installed-app-data scans
+    // so "installed" vs "leftover" can never drift apart.
+    private func folderMatchesInstalledApp(_ folder: String, lowerFolder: String, normalizedFolder: String, installedApps: Set<String>) -> Bool {
+        installedApps.contains { appKey in
+            guard !appKey.isEmpty else { return false }
+            let normalizedAppKey = normalizeString(appKey)
+            if lowerFolder == appKey || normalizedFolder == normalizedAppKey {
+                return true
+            }
+            if normalizedFolder.count >= 4 && normalizedAppKey.count >= 4 {
+                if normalizedFolder.contains(normalizedAppKey) || normalizedAppKey.contains(normalizedFolder) {
+                    return true
+                }
+            }
+            return false
+        }
     }
 
     // Fetch all currently installed application names and bundle identifiers across system application directories
@@ -632,6 +687,60 @@ struct ContentView: View {
         return identifiers
     }
 
+    // macOS system / essential folders under ~/Library/Application Support that should never
+    // be listed as app data (neither leftover nor installed-app data). Shared by both scans.
+    private static let appSupportSystemIgnoreList: Set<String> = [
+        "addressbook", "clouddocs", "mobilesync", "dock", "safari", "apple", "com.apple.",
+        "accounts", "crashreporter", "defaultappprovider", "knowledge", "quick look",
+        "app store", "callhistorydb", "coresimulator", "developer", "system", "syncservices",
+        "bluetooth", "preferences", "keychains", "logs", "caches"
+    ]
+
+    // Entries directly under ~ that macOS itself creates (standard user folders + system
+    // dot-files/metadata) and so should NOT be listed as user/tool-installed items.
+    private static let homeSystemEntries: Set<String> = [
+        "desktop", "documents", "downloads", "library", "movies", "music",
+        "pictures", "public", "applications", "sites",
+        ".ds_store", ".localized", ".cfusertextencoding", ".trash", ".fseventsd",
+        ".spotlight-v100", ".temporaryitems", ".vol", ".file", ".hotfiles.btree",
+        ".documentrevisions-v100", ".pkinstallsandboxmanager", ".zsh_sessions"
+    ]
+
+    // Short (<= ~10 char) descriptions for common home-directory entries whose raw name
+    // doesn't say what they are. Looked up by lowercased entry name; unknown entries get none.
+    private static let homeEntryDescriptions: [String: String] = [
+        ".ollama": "本地大模型", ".docker": "Docker配置", ".colima": "Docker运行时",
+        ".orbstack": "Docker运行时", ".lima": "Docker运行时", ".minikube": "K8s本地",
+        ".cargo": "Rust包", ".rustup": "Rust工具链", ".gradle": "Gradle构建",
+        ".m2": "Maven仓库", ".ivy2": "Ivy仓库", ".npm": "npm缓存", ".pnpm-store": "pnpm缓存",
+        ".pnpm-state": "pnpm缓存", ".yarn": "Yarn缓存", ".bun": "Bun运行时", ".deno": "Deno缓存",
+        ".node-gyp": "编译缓存", ".node": "Node数据", ".nvm": "Node版本", ".fnm": "Node版本",
+        ".volta": "Node版本", ".asdf": "版本管理", ".pyenv": "Python版本", ".sdkman": "Java版本",
+        ".cocoapods": "iOS依赖", ".flutter": "Flutter配置", ".dart": "Dart SDK",
+        ".android": "安卓SDK", ".aws": "AWS配置", ".kube": "K8s配置", ".ssh": "SSH密钥",
+        ".gnupg": "GPG密钥", ".config": "配置文件", ".cache": "通用缓存", ".local": "用户数据",
+        ".gem": "Ruby宝石", ".bundle": "Ruby依赖", ".fastlane": "iOS自动化", ".expo": "RN工具",
+        ".cmake": "CMake", ".conan": "C++依赖", ".ipython": "Python交互", ".jupyter": "Jupyter",
+        ".matplotlib": "绘图缓存", ".helm": "Helm", ".terraform.d": "Terraform",
+        ".vagrant.d": "Vagrant", ".putty": "PuTTY", ".cups": "打印配置", ".vscode": "VSCode配置",
+        ".cursor": "Cursor配置", ".windsurf": "Windsurf", ".fleet": "Fleet编辑器",
+        ".claude": "Claude配置", ".cline": "Cline配置", ".copilot": "Copilot配置",
+        ".codeium": "Codeium配置", ".gemini": "Gemini配置", ".chatgpt": "ChatGPT配置",
+        ".zshrc": "zsh配置", ".zshenv": "zsh配置", ".zprofile": "zsh配置",
+        ".bashrc": "bash配置", ".bash_profile": "bash配置", ".profile": "Shell配置",
+        ".gitconfig": "Git配置", ".gitignore_global": "Git忽略", ".npmrc": "npm配置",
+        ".yarnrc": "Yarn配置", ".vimrc": "Vim配置", ".vim": "Vim配置",
+        ".zsh_history": "命令历史", ".bash_history": "命令历史", ".mysql_history": "MySQL历史",
+        ".python_history": "Python历史", ".node_repl_history": "Node历史",
+        ".swiftpm": "Swift包", ".switchhosts": "Hosts管理", ".shadowsocksx-ng": "代理工具",
+        ".mitmproxy": "抓包工具", ".termora": "终端工具", ".harmony": "鸿蒙开发",
+        ".ohos": "鸿蒙开发", ".ohpm": "鸿蒙包", ".hvigor": "鸿蒙构建", ".aliyun": "阿里云CLI",
+        "flutter": "Flutter SDK", "venvs": "Python虚拟环境", "androidstudioprojects": "安卓项目",
+        "wechatprojects": "微信项目", "codegeexprojects": "CodeGeeX项目",
+        "writersideprojects": "Writerside项目", "postman": "API测试", "plugins": "插件",
+        "creative cloud files": "Adobe云文件", "yarn.lock": "依赖锁定"
+    ]
+
     // Dynamically scan for folders in Application Support that belong to UNINSTALLED applications
     private func scanAppLeftovers(basePath: String) -> [CategoryItem] {
         let expandedBasePath = NSString(string: basePath).expandingTildeInPath
@@ -641,14 +750,6 @@ struct ContentView: View {
         }
 
         let installedApps = fetchInstalledAppIdentifiers()
-
-        // System / macOS essential folders to skip
-        let systemIgnoreList: Set<String> = [
-            "addressbook", "clouddocs", "mobilesync", "dock", "safari", "apple", "com.apple.",
-            "accounts", "crashreporter", "defaultappprovider", "knowledge", "quick look",
-            "app store", "callhistorydb", "coresimulator", "developer", "system", "syncservices",
-            "bluetooth", "preferences", "keychains", "logs", "caches"
-        ]
 
         var childItems: [CategoryItem] = []
         var totalBytes: Int64 = 0
@@ -662,7 +763,7 @@ struct ContentView: View {
             let normalizedFolder = normalizeString(folder)
 
             // 1. Check if folder is a macOS system folder
-            let isSystemFolder = systemIgnoreList.contains { sysKey in
+            let isSystemFolder = Self.appSupportSystemIgnoreList.contains { sysKey in
                 lowerFolder == sysKey || lowerFolder.hasPrefix(sysKey)
             }
             if isSystemFolder {
@@ -675,19 +776,7 @@ struct ContentView: View {
             }
 
             // 3. Check if folder matches any installed application
-            let isAppInstalled = installedApps.contains { appKey in
-                guard !appKey.isEmpty else { return false }
-                let normalizedAppKey = normalizeString(appKey)
-                if lowerFolder == appKey || normalizedFolder == normalizedAppKey {
-                    return true
-                }
-                if normalizedFolder.count >= 4 && normalizedAppKey.count >= 4 {
-                    if normalizedFolder.contains(normalizedAppKey) || normalizedAppKey.contains(normalizedFolder) {
-                        return true
-                    }
-                }
-                return false
-            }
+            let isAppInstalled = folderMatchesInstalledApp(folder, lowerFolder: lowerFolder, normalizedFolder: normalizedFolder, installedApps: installedApps)
 
             // If the app is currently installed, SKIP IT (Not a leftover!)
             if isAppInstalled {
@@ -735,7 +824,7 @@ struct ContentView: View {
             iconName: "folder.badge.minus",
             iconColor: .pink,
             cleanType: .none,
-            note: "Uninstalled Application Data"
+            note: "应用残留"
         )
 
         let parentItem = CategoryItem(
@@ -814,7 +903,7 @@ struct ContentView: View {
             iconName: "shippingbox.fill",
             iconColor: .orange,
             cleanType: .none,
-            note: "Tool cache - safe to clear, will be re-downloaded"
+            note: "工具缓存"
         )
         let parent = CategoryItem(
             name: parentRule.name,
@@ -873,15 +962,7 @@ struct ContentView: View {
             if isBinaryInPATH(entry) || isBinaryInPATH(lower) || isBinaryInPATH(normalized) { continue }
 
             // Skip folders belonging to a currently installed application
-            let isInstalled = installedApps.contains { appKey in
-                guard !appKey.isEmpty else { return false }
-                let nApp = normalizeString(appKey)
-                if lower == appKey || normalized == nApp { return true }
-                if normalized.count >= 4 && nApp.count >= 4 {
-                    if normalized.contains(nApp) || nApp.contains(normalized) { return true }
-                }
-                return false
-            }
+            let isInstalled = folderMatchesInstalledApp(entry, lowerFolder: lower, normalizedFolder: normalized, installedApps: installedApps)
             if isInstalled { continue }
 
             let bytes = calculateDirectorySize(at: fullPath, isDirectory: true)
@@ -918,7 +999,7 @@ struct ContentView: View {
             iconName: "folder.badge.minus",
             iconColor: .pink,
             cleanType: .none,
-            note: "Possible uninstalled app/tool leftover"
+            note: "目录残留"
         )
         let parent = CategoryItem(
             name: parentRule.name,
@@ -1083,7 +1164,7 @@ struct ContentView: View {
     }
 
     // Convenience builder for read-only display nodes.
-    private func displayItem(name: String, label: String, icon: String, color: Color, note: String? = nil, children: [CategoryItem]? = nil, sizeBytes: Int64 = 0, finderPath: String? = nil) -> CategoryItem {
+    private func displayItem(name: String, label: String, icon: String, color: Color, note: String? = nil, children: [CategoryItem]? = nil, sizeBytes: Int64 = 0, finderPath: String? = nil, description: String? = nil) -> CategoryItem {
         CategoryItem(
             name: name,
             pathDescription: label,
@@ -1094,7 +1175,8 @@ struct ContentView: View {
             rule: CleanRule(name: name, pathDescription: label, iconName: icon, iconColor: color, cleanType: .none, note: note),
             children: children,
             isDisplayOnly: true,
-            finderPath: finderPath
+            finderPath: finderPath,
+            description: description
         )
     }
 
@@ -1105,8 +1187,8 @@ struct ContentView: View {
     }
 
     // A read-only leaf module with an optional on-disk size and Finder location.
-    private func leaf(_ name: String, _ size: Int64 = 0, finderPath: String? = nil) -> CategoryItem {
-        displayItem(name: name, label: name, icon: "circle.fill", color: .secondary, sizeBytes: size, finderPath: finderPath)
+    private func leaf(_ name: String, _ size: Int64 = 0, finderPath: String? = nil, description: String? = nil) -> CategoryItem {
+        displayItem(name: name, label: name, icon: "circle.fill", color: .secondary, sizeBytes: size, finderPath: finderPath, description: description)
     }
 
     // Parse `gem environment` for GEM PATHS entries (lines like "     - /path").
@@ -1244,7 +1326,7 @@ struct ContentView: View {
             ownedDirs.insert((prefix as NSString).appendingPathComponent("bin"))
             let displayLabel = "\(label)  (\(pkgs.count))"
             if pkgs.isEmpty {
-                installNodes.append(displayItem(name: label, label: displayLabel, icon: "shippingbox.fill", color: .green, note: "no global packages", finderPath: nm.isEmpty ? nil : nm))
+                installNodes.append(displayItem(name: label, label: displayLabel, icon: "shippingbox.fill", color: .green, note: "无全局包", finderPath: nm.isEmpty ? nil : nm))
             } else {
                 let children = pkgs.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (nm as NSString).appendingPathComponent($0.0)) }
                 installNodes.append(displayParent(name: label, label: displayLabel, icon: "shippingbox.fill", color: .green, children: children, finderPath: nm))
@@ -1252,6 +1334,54 @@ struct ContentView: View {
         }
 
         return displayParent(name: "Node.js", label: "Node.js", icon: "shippingbox.fill", color: .green, children: installNodes)
+    }
+
+    // Full paths of the home-root entries the Home Directory section lists (non-system,
+    // non-iCloud). Used to avoid showing the same data twice in Installed Tools.
+    private func homeDirectoryEntryPaths() -> Set<String> {
+        let home = NSHomeDirectory()
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: home) else { return [] }
+        var paths = Set<String>()
+        for entry in entries {
+            let lower = entry.lowercased()
+            if Self.homeSystemEntries.contains(lower) { continue }
+            if lower.hasPrefix("icloud") { continue }
+            let resolved = URL(fileURLWithPath: (home as NSString).appendingPathComponent(entry)).resolvingSymlinksInPath().path
+            paths.insert(resolved)
+        }
+        return paths
+    }
+
+    // True if `path` falls under one of the home-root entries shown in Home Directory.
+    private func isPathCoveredByHome(_ path: String, coveredPaths: Set<String>) -> Bool {
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        return coveredPaths.contains { entryPath in
+            resolved == entryPath || resolved.hasPrefix(entryPath + "/")
+        }
+    }
+
+    // Recursively drop nodes whose location is already shown in Home Directory, recompute
+    // parent sizes, and prune parents that become empty as a result.
+    private func filterHomeCoveredNodes(_ items: [CategoryItem], coveredPaths: Set<String>) -> [CategoryItem] {
+        var result: [CategoryItem] = []
+        for item in items {
+            if let fp = item.finderPath, isPathCoveredByHome(fp, coveredPaths: coveredPaths) {
+                continue
+            }
+            if let children = item.children, !children.isEmpty {
+                let filtered = filterHomeCoveredNodes(children, coveredPaths: coveredPaths)
+                if filtered.isEmpty { continue }
+                var rebuilt = item
+                rebuilt.children = filtered
+                rebuilt.sizeBytes = filtered.reduce(Int64(0)) { $0 + $1.sizeBytes }
+                rebuilt.sizeString = rebuilt.sizeBytes > 0 ? formatBytes(rebuilt.sizeBytes) : ""
+                result.append(rebuilt)
+            } else {
+                result.append(item)
+            }
+        }
+        return result
     }
 
     // Build the read-only "Installed Tools" tree from non-system PATH tools and their modules.
@@ -1480,7 +1610,112 @@ struct ContentView: View {
             toolNodes.append(displayParent(name: "Other PATH tools", label: "Other PATH tools", icon: "folder.fill", color: .secondary, children: otherNodes))
         }
 
-        return displayParent(name: "Installed Tools", label: "Installed Tools", icon: "terminal.fill", color: .secondary, note: "informational only", children: toolNodes)
+        // Drop tool nodes whose on-disk location is already listed in the Home Directory
+        // section (e.g. ~/.cargo, ~/go, ~/.nvm) so the same data isn't shown twice.
+        let coveredPaths = homeDirectoryEntryPaths()
+        let filteredToolNodes = filterHomeCoveredNodes(toolNodes, coveredPaths: coveredPaths)
+        return displayParent(name: "Installed Tools", label: "Installed Tools", icon: "terminal.fill", color: .secondary, note: "仅浏览", children: filteredToolNodes)
+    }
+
+    // Enumerate every non-system entry (file or folder, hidden or visible) directly under the
+    // home directory -- especially the dot-prefixed tool/data folders such as .ollama, .cargo,
+    // .gradle. Display-only: each row reveals its location in Finder via the magnifying glass;
+    // nothing here is ever cleaned. Docker is added explicitly because its ~60GB VM disk lives
+    // under ~/Library/Containers (nested under Library, so a home-root scan would miss it).
+    private func scanHomeDirectory() -> CategoryItem? {
+        let home = NSHomeDirectory()
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: home) else { return nil }
+
+        var childItems: [CategoryItem] = []
+
+        // Docker's bulk data is nested under ~/Library/Containers, not the home root, so the
+        // enumeration below can't see it. Surface it as a special entry when present.
+        let dockerPath = (home as NSString).appendingPathComponent("Library/Containers/com.docker.docker")
+        var dockerIsDir: ObjCBool = false
+        if fm.fileExists(atPath: dockerPath, isDirectory: &dockerIsDir), dockerIsDir.boolValue {
+            let bytes = calculateDirectorySize(at: dockerPath, isDirectory: true)
+            if bytes > 0 {
+                childItems.append(displayItem(name: "Docker", label: "Docker", icon: "cube.fill", color: .blue, sizeBytes: bytes, finderPath: dockerPath, description: "Docker数据"))
+            }
+        }
+
+        for entry in entries {
+            let lowerEntry = entry.lowercased()
+            if Self.homeSystemEntries.contains(lowerEntry) { continue }
+            // iCloud Drive's local archive ("iCloud云盘（归档）" / "iCloud Drive") is macOS-managed
+            if lowerEntry.hasPrefix("icloud") { continue }
+
+            let fullPath = (home as NSString).appendingPathComponent(entry)
+            var entryIsDir: ObjCBool = false
+            guard fm.fileExists(atPath: fullPath, isDirectory: &entryIsDir) else { continue }
+
+            let bytes = calculateDirectorySize(at: fullPath, isDirectory: entryIsDir.boolValue)
+            let icon: String
+            if entryIsDir.boolValue {
+                icon = entry.hasPrefix(".") ? "folder.fill" : "folder"
+            } else {
+                icon = "doc"
+            }
+            childItems.append(displayItem(name: entry, label: "~/\(entry)", icon: icon, color: .secondary, sizeBytes: bytes, finderPath: fullPath, description: Self.homeEntryDescriptions[lowerEntry]))
+        }
+
+        guard !childItems.isEmpty else { return nil }
+        childItems.sort { $0.sizeBytes > $1.sizeBytes }
+
+        return displayParent(name: "Home Directory", label: "Home Directory", icon: "house.fill", color: .secondary, note: "非系统项", children: childItems)
+    }
+
+    // Mirror of scanAppLeftovers, but lists Application Support folders that belong to
+    // INSTALLED apps (so the user can browse/open them). Display-only: no deletion.
+    private func scanInstalledAppData(basePath: String) -> CategoryItem? {
+        let expandedBasePath = NSString(string: basePath).expandingTildeInPath
+        let fileManager = FileManager.default
+        guard let subfolders = try? fileManager.contentsOfDirectory(atPath: expandedBasePath) else {
+            return nil
+        }
+
+        let installedApps = fetchInstalledAppIdentifiers()
+
+        var childItems: [CategoryItem] = []
+
+        for folder in subfolders {
+            if folder.hasPrefix(".") || folder.hasSuffix("_Lock") {
+                continue
+            }
+
+            let lowerFolder = folder.lowercased()
+            let normalizedFolder = normalizeString(folder)
+
+            // Skip macOS system folders
+            let isSystemFolder = Self.appSupportSystemIgnoreList.contains { sysKey in
+                lowerFolder == sysKey || lowerFolder.hasPrefix(sysKey)
+            }
+            if isSystemFolder {
+                continue
+            }
+
+            // KEEP only folders that correspond to a currently installed application
+            guard folderMatchesInstalledApp(folder, lowerFolder: lowerFolder, normalizedFolder: normalizedFolder, installedApps: installedApps) else {
+                continue
+            }
+
+            let fullPath = (expandedBasePath as NSString).appendingPathComponent(folder)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory), isDirectory.boolValue else { continue }
+
+            let sizeBytes = calculateDirectorySize(at: fullPath, isDirectory: true)
+            // Display-only browsing: focus on folders taking meaningful space (> 50 MB)
+            guard sizeBytes > 50_000_000 else { continue }
+
+            let displayPath = "\(basePath)/\(folder)"
+            childItems.append(displayItem(name: folder, label: displayPath, icon: "folder.fill", color: .blue, sizeBytes: sizeBytes, finderPath: fullPath))
+        }
+
+        guard !childItems.isEmpty else { return nil }
+        childItems.sort { $0.sizeBytes > $1.sizeBytes }
+
+        return displayParent(name: "Installed App Data", label: basePath, icon: "folder.fill", color: .blue, note: "应用数据", children: childItems, finderPath: expandedBasePath)
     }
 
     // Core deletion for a single item (runs on a background thread)
@@ -1699,7 +1934,12 @@ struct ContentView: View {
             // Reveal files / app bundles in Finder instead of launching them
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } else {
-            NSWorkspace.shared.open(url)
+            // Open the directory in Finder. Some directories (e.g. another app's
+            // ~/Library/Containers/<bundle-id> root) can't be "opened" by LaunchServices
+            // (kLSApplicationNotFoundErr), so fall back to revealing the folder instead.
+            if !NSWorkspace.shared.open(url) {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
         }
     }
 }
