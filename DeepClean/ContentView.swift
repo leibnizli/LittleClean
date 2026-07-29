@@ -752,7 +752,115 @@ struct ContentView: View {
         "flutter": "Flutter SDK", "venvs": "Python Venvs", "androidstudioprojects": "Android Projects",
         "wechatprojects": "WeChat Projects", "codegeexprojects": "CodeGeeX Projects",
         "writersideprojects": "Writerside Projects", "postman": "API Testing", "plugins": "Plugins",
-        "creative cloud files": "Adobe Cloud Files", "yarn.lock": "Dependency Lock"
+        "creative cloud files": "Adobe Cloud Files", "yarn.lock": "Dependency Lock",
+        ".alibabacloud": "Aliyun CLI", ".tencentcloud": "Tencent CLI", ".wechat_devtools": "WeChat Projects",
+        ".codegeex": "CodeGeeX Projects", ".writerside": "Writerside Projects"
+    ]
+
+    // Custom SF Symbols and colors for known home directory entries.
+    private static let homeEntryIcons: [String: (String, Color)] = [
+        ".gradle": ("cup.and.saucer.fill", .teal),
+        ".android": ("candybarphone", .green),
+        ".npm": ("shippingbox.fill", .red),
+        ".gemini": ("sparkles", .indigo),
+        ".konan": ("hammer.fill", .purple),
+        "flutter": ("paperplane.fill", .cyan), // Fixed typo (was .flutter)
+        ".ollama": ("brain.head.profile", .gray),
+        ".cocoapods": ("square.stack.3d.down.right.fill", .red),
+        ".rustup": ("gearshape.2.fill", .orange),
+        ".cargo": ("shippingbox.fill", .orange),
+        ".expo": ("arrow.up.forward.app.fill", .gray),
+        ".nvm": ("network", .green),
+        ".sdkman": ("wrench.and.screwdriver.fill", .gray),
+        ".local": ("folder.badge.gearshape", .secondary),
+        ".cursor": ("cursorarrow", .blue),
+        ".cache": ("archivebox.fill", .secondary),
+        ".config": ("gearshape.fill", .secondary),
+        ".ssh": ("key.fill", .gray),
+        ".gnupg": ("lock.shield.fill", .gray),
+        ".docker": ("cube.fill", .blue),
+        ".m2": ("cup.and.saucer.fill", .indigo),
+        ".pnpm-store": ("shippingbox.fill", .teal),
+        ".yarn": ("shippingbox.fill", .blue),
+        ".bun": ("shippingbox.fill", .pink),
+        ".colima": ("cube.fill", .blue),
+        ".orbstack": ("cube.fill", .blue),
+        ".lima": ("cube.fill", .blue),
+        ".minikube": ("cube.fill", .blue),
+        ".ivy2": ("cup.and.saucer.fill", .indigo),
+        ".pnpm-state": ("shippingbox.fill", .teal),
+        ".deno": ("shippingbox.fill", .green),
+        ".node-gyp": ("hammer.fill", .gray),
+        ".node": ("network", .green),
+        ".fnm": ("network", .green),
+        ".volta": ("network", .green),
+        ".asdf": ("square.stack.3d.down.right.fill", .gray),
+        ".pyenv": ("curlybraces", .yellow),
+        ".dart": ("paperplane.fill", .cyan),
+        ".aws": ("cloud.fill", .orange),
+        ".kube": ("network", .blue),
+        ".gem": ("diamond.fill", .red),
+        ".bundle": ("shippingbox.fill", .red),
+        ".fastlane": ("car.fill", .mint),
+        ".cmake": ("hammer.fill", .gray),
+        ".conan": ("shippingbox.fill", .blue),
+        ".ipython": ("curlybraces", .yellow),
+        ".jupyter": ("book.fill", .orange),
+        ".matplotlib": ("chart.bar.fill", .blue),
+        ".helm": ("sailboat.fill", .blue),
+        ".terraform.d": ("globe", .purple),
+        ".vagrant.d": ("cube.fill", .blue),
+        ".putty": ("terminal.fill", .gray),
+        ".cups": ("printer.fill", .gray),
+        ".vscode": ("chevron.left.forwardslash.chevron.right", .blue),
+        ".windsurf": ("wind", .cyan),
+        ".fleet": ("paperplane.fill", .blue),
+        ".claude": ("sparkles", .orange),
+        ".cline": ("sparkles", .blue),
+        ".copilot": ("sparkles", .purple),
+        ".codeium": ("sparkles", .green),
+        ".chatgpt": ("sparkles", .green),
+        ".zshrc": ("terminal.fill", .gray),
+        ".zshenv": ("terminal.fill", .gray),
+        ".zprofile": ("terminal.fill", .gray),
+        ".bashrc": ("terminal.fill", .gray),
+        ".bash_profile": ("terminal.fill", .gray),
+        ".profile": ("terminal.fill", .gray),
+        ".gitconfig": ("arrow.triangle.branch", .orange),
+        ".gitignore_global": ("doc.text.fill", .orange),
+        ".npmrc": ("doc.text.fill", .red),
+        ".yarnrc": ("doc.text.fill", .blue),
+        ".vimrc": ("terminal.fill", .green),
+        ".vim": ("terminal.fill", .green),
+        ".zsh_history": ("clock.fill", .gray),
+        ".bash_history": ("clock.fill", .gray),
+        ".mysql_history": ("clock.fill", .gray),
+        ".python_history": ("clock.fill", .gray),
+        ".node_repl_history": ("clock.fill", .gray),
+        ".swiftpm": ("swift", .orange),
+        ".switchhosts": ("network", .gray),
+        ".shadowsocksx-ng": ("paperplane.fill", .blue),
+        ".mitmproxy": ("network", .gray),
+        ".termora": ("terminal.fill", .gray),
+        ".harmony": ("cube.fill", .blue),
+        ".ohos": ("cube.fill", .blue),
+        ".ohpm": ("shippingbox.fill", .blue),
+        ".hvigor": ("hammer.fill", .blue),
+        ".aliyun": ("cloud.fill", .orange),
+        ".alibabacloud": ("cloud.fill", .orange),
+        ".tencentcloud": ("cloud.fill", .blue),
+        ".wechat_devtools": ("hammer.fill", .green),
+        ".codegeex": ("sparkles", .purple),
+        ".writerside": ("book.fill", .blue),
+        "venvs": ("curlybraces", .yellow),
+        "androidstudioprojects": ("candybarphone", .green),
+        "wechatprojects": ("bubble.left.fill", .green),
+        "codegeexprojects": ("sparkles", .purple),
+        "writersideprojects": ("book.fill", .blue),
+        "postman": ("paperplane.fill", .orange),
+        "plugins": ("puzzlepiece.fill", .gray),
+        "creative cloud files": ("cloud.fill", .red),
+        "yarn.lock": ("lock.fill", .blue)
     ]
 
     // Dynamically scan for folders in Application Support that belong to UNINSTALLED applications
@@ -971,8 +1079,8 @@ struct ContentView: View {
             let rule = CleanRule(
                 name: entry,
                 pathDescription: displayPath,
-                iconName: "folder.badge.minus",
-                iconColor: .pink,
+                iconName: Self.homeEntryIcons[lower]?.0 ?? Self.homeEntryIcons[normalized]?.0 ?? "folder.badge.minus",
+                iconColor: Self.homeEntryIcons[lower]?.1 ?? Self.homeEntryIcons[normalized]?.1 ?? .pink,
                 cleanType: .deleteDirectoryTree,
                 note: note
             )
@@ -1629,13 +1737,19 @@ struct ContentView: View {
             guard fm.fileExists(atPath: fullPath, isDirectory: &entryIsDir) else { continue }
 
             let bytes = calculateDirectorySize(at: fullPath, isDirectory: entryIsDir.boolValue)
-            let icon: String
-            if entryIsDir.boolValue {
+            var icon: String
+            var color: Color = .secondary
+            
+            if let custom = Self.homeEntryIcons[lowerEntry] {
+                icon = custom.0
+                color = custom.1
+            } else if entryIsDir.boolValue {
                 icon = entry.hasPrefix(".") ? "folder.fill" : "folder"
             } else {
                 icon = "doc"
             }
-            childItems.append(displayItem(name: entry, label: "~/\(entry)", icon: icon, color: .secondary, sizeBytes: bytes, finderPath: fullPath, description: Self.homeEntryDescriptions[lowerEntry]))
+            
+            childItems.append(displayItem(name: entry, label: "~/\(entry)", icon: icon, color: color, sizeBytes: bytes, finderPath: fullPath, description: Self.homeEntryDescriptions[lowerEntry]))
         }
 
         guard !childItems.isEmpty else { return nil }
