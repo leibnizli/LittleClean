@@ -73,8 +73,16 @@
         }
       }
     },
-    "Container Leftover" : {},
-    "Container Leftovers" : {},
+    "Container Leftovers" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用容器残留"
+          }
+        }
+      }
+    },
     "Docker Data" : {},
     "Free %@" : {
       "localizations" : {

@@ -1060,7 +1060,7 @@ struct ContentView: View {
                     iconName: "shippingbox.fill",
                     iconColor: .pink,
                     cleanType: .deleteDirectoryTree,
-                    note: "Container Leftover"
+                    note: "App Leftovers"
                 )
 
                 let childItem = CategoryItem(
@@ -1086,7 +1086,7 @@ struct ContentView: View {
             iconName: "shippingbox.fill",
             iconColor: .pink,
             cleanType: .none,
-            note: "Container Leftover"
+            note: "App Leftovers"
         )
 
         let parentItem = CategoryItem(
