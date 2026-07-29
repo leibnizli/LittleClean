@@ -9,17 +9,17 @@ nonisolated func formatBytes(_ bytes: Int64) -> String {
     let tb = gb / 1000.0
 
     let formatter = NumberFormatter()
-    formatter.minimumFractionDigits = 2
-    formatter.maximumFractionDigits = 2
+    formatter.minimumFractionDigits = 3
+    formatter.maximumFractionDigits = 3
     formatter.numberStyle = .decimal
 
     if tb >= 1.0 {
-        return "\(formatter.string(from: NSNumber(value: tb)) ?? "0.00") TB"
+        return "\(formatter.string(from: NSNumber(value: tb)) ?? "0.000") TB"
     } else if gb >= 1.0 {
-        return "\(formatter.string(from: NSNumber(value: gb)) ?? "0.00") GB"
+        return "\(formatter.string(from: NSNumber(value: gb)) ?? "0.000") GB"
     } else if mb >= 1.0 {
-        return "\(formatter.string(from: NSNumber(value: mb)) ?? "0.00") MB"
+        return "\(formatter.string(from: NSNumber(value: mb)) ?? "0.000") MB"
     } else {
-        return "\(formatter.string(from: NSNumber(value: kb)) ?? "0.00") KB"
+        return "\(formatter.string(from: NSNumber(value: kb)) ?? "0.000") KB"
     }
 }
