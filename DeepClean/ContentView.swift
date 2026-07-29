@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -27,8 +28,12 @@ struct ContentView: View {
             TableColumn("Path", value: \.pathDescription) { item in
                 HStack(alignment: .center, spacing: 6) {
                     if let children = item.children, !children.isEmpty {
-                        Image(systemName: "folder.fill")
-                            .foregroundColor(.blue)
+                        let hasToolIcon = NSImage(
+                            systemSymbolName: item.iconName,
+                            accessibilityDescription: nil
+                        ) != nil
+                        Image(systemName: hasToolIcon ? item.iconName : "folder.fill")
+                            .foregroundColor(hasToolIcon ? item.iconColor : .blue)
                             .frame(width: 16)
                     } else if item.isDisplayOnly || item.rule.isCheckboxHidden {
                         Image(systemName: item.iconName)
