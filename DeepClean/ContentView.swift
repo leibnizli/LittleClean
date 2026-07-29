@@ -113,7 +113,7 @@ struct ContentView: View {
                         .disabled(!enabled)
                     }
 
-                    Text(item.displayPath ?? item.pathDescription)
+                    Text(LocalizedStringKey(item.displayPath ?? item.pathDescription))
                         .font(.system(size: 13))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -122,7 +122,7 @@ struct ContentView: View {
             }
             
             TableColumn("Note") { item in
-                Text(item.description ?? item.rule.note ?? "")
+                Text(LocalizedStringKey(item.description ?? item.rule.note ?? ""))
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -185,7 +185,7 @@ struct ContentView: View {
     @ViewBuilder
     private func itemContextMenu(_ item: CategoryItem) -> some View {
         if !item.isDisplayOnly && !item.rule.isCheckboxHidden && item.sizeBytes > 0 {
-            Button("Clean \"\(item.name)\"") {
+            Button(LocalizedStringKey("Clean \"\(item.name)\"")) {
                 cleanSingleItem(item)
             }
         }
@@ -2072,14 +2072,26 @@ struct ContentView: View {
 
     private func formatBytes(_ bytes: Int64) -> String {
         if bytes == 0 { return "0 KB" }
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useGB, .useTB, .useMB]
-        formatter.countStyle = .file
-        var result = formatter.string(fromByteCount: bytes)
-        if result == "Zero KB" {
-            result = "0 KB"
+        
+        let kb = Double(bytes) / 1000.0
+        let mb = kb / 1000.0
+        let gb = mb / 1000.0
+        let tb = gb / 1000.0
+        
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        formatter.numberStyle = .decimal
+        
+        if tb >= 1.0 {
+            return "\(formatter.string(from: NSNumber(value: tb)) ?? "0.00") TB"
+        } else if gb >= 1.0 {
+            return "\(formatter.string(from: NSNumber(value: gb)) ?? "0.00") GB"
+        } else if mb >= 1.0 {
+            return "\(formatter.string(from: NSNumber(value: mb)) ?? "0.00") MB"
+        } else {
+            return "\(formatter.string(from: NSNumber(value: kb)) ?? "0.00") KB"
         }
-        return result
     }
 
     // Open a directory in Finder, or reveal a file / .app bundle (without launching it).
