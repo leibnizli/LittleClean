@@ -1689,11 +1689,11 @@ struct ContentView: View {
             if bins.isEmpty { continue }
             let display = dir.hasPrefix(home) ? "~" + dir.dropFirst(home.count) : dir
             let children = bins.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (dir as NSString).appendingPathComponent($0.0)) }
-            otherNodes.append(displayParent(name: dir, label: display, icon: "folder.fill", color: .gray, children: children, finderPath: dir))
+            otherNodes.append(displayParent(name: dir, label: display, icon: "folder.fill", color: .blue, children: children, finderPath: dir))
         }
         if !otherNodes.isEmpty {
             otherNodes.sort { $0.sizeBytes > $1.sizeBytes }
-            toolNodes.append(displayParent(name: "Other PATH tools", label: "Other PATH tools", icon: "folder.fill", color: .secondary, children: otherNodes))
+            toolNodes.append(displayParent(name: "Other PATH tools", label: "Other PATH tools", icon: "folder.fill", color: .blue, children: otherNodes))
         }
 
         // Drop tool nodes whose on-disk location is already listed in the Home Directory
@@ -1738,15 +1738,17 @@ struct ContentView: View {
 
             let bytes = calculateDirectorySize(at: fullPath, isDirectory: entryIsDir.boolValue)
             var icon: String
-            var color: Color = .secondary
+            var color: Color
             
             if let custom = Self.homeEntryIcons[lowerEntry] {
                 icon = custom.0
                 color = custom.1
             } else if entryIsDir.boolValue {
                 icon = entry.hasPrefix(".") ? "folder.fill" : "folder"
+                color = .blue
             } else {
                 icon = "doc"
+                color = .secondary
             }
             
             childItems.append(displayItem(name: entry, label: "~/\(entry)", icon: icon, color: color, sizeBytes: bytes, finderPath: fullPath, description: Self.homeEntryDescriptions[lowerEntry]))

@@ -57,7 +57,7 @@ struct CleanConfig {
             name: "Home Directory Cleanup",
             pathDescription: "~",
             iconName: "folder.fill",
-            iconColor: .indigo,
+            iconColor: .blue,
             note: "Home Cleanup",
             isDynamicHomeCleanupRule: true,
             isCheckboxHidden: true
