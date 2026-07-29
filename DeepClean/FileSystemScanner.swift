@@ -597,8 +597,7 @@ nonisolated struct FileSystemScanner: Sendable {
                         pathDescription: displayPath,
                         iconName: "folder.badge.minus",
                         iconColor: .pink,
-                        cleanType: .deleteDirectoryTree,
-                        note: "App Leftovers"
+                        cleanType: .deleteDirectoryTree
                     )
 
                     let childItem = CategoryItem(
@@ -702,8 +701,7 @@ nonisolated struct FileSystemScanner: Sendable {
                     pathDescription: displayPath,
                     iconName: "shippingbox.fill",
                     iconColor: .pink,
-                    cleanType: .deleteDirectoryTree,
-                    note: "Container Leftovers"
+                    cleanType: .deleteDirectoryTree
                 )
 
                 let childItem = CategoryItem(
@@ -858,14 +856,14 @@ nonisolated struct FileSystemScanner: Sendable {
 
             totalBytes += bytes
             let displayPath = "~/\(entry)"
-            let note = Self.homeEntryDescriptions[lower] ?? Self.homeEntryDescriptions[normalized] ?? "App Leftovers"
+            let note = Self.homeEntryDescriptions[lower] ?? Self.homeEntryDescriptions[normalized]
             let rule = CleanRule(
                 name: entry,
                 pathDescription: displayPath,
                 iconName: Self.homeEntryIcons[lower]?.0 ?? Self.homeEntryIcons[normalized]?.0 ?? "folder.badge.minus",
                 iconColor: Self.homeEntryIcons[lower]?.1 ?? Self.homeEntryIcons[normalized]?.1 ?? .pink,
                 cleanType: .deleteDirectoryTree,
-                note: LocalizedStringKey(note)
+                note: note.map { LocalizedStringKey($0) }
             )
             let item = CategoryItem(
                 name: entry,
