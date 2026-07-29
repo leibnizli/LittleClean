@@ -15,7 +15,7 @@ struct CleanRule: Identifiable {
     let iconName: String
     let iconColor: Color
     var cleanType: CleanType = .deleteDirectory
-    var note: String? = nil
+    var note: LocalizedStringKey? = nil
     var isDynamicSimulatorRule: Bool = false
     var isDynamicLeftoversRule: Bool = false
     var isDynamicHomeCleanupRule: Bool = false

@@ -18,7 +18,7 @@ struct CategoryItem: Identifiable {
     // Override label shown in the Path column (used to show ancestor context in search results)
     var displayPath: String? = nil
     // Short description shown in the "Note" column (what this dir/tool is)
-    var description: String? = nil
+    var description: LocalizedStringKey? = nil
 }
 
 private enum SelectionState {
@@ -113,7 +113,7 @@ struct ContentView: View {
                         .disabled(!enabled)
                     }
 
-                    Text(LocalizedStringKey(item.displayPath ?? item.pathDescription))
+                    Text(verbatim: item.displayPath ?? item.pathDescription)
                         .font(.system(size: 13))
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -122,7 +122,7 @@ struct ContentView: View {
             }
             
             TableColumn("Note") { item in
-                Text(LocalizedStringKey(item.description ?? item.rule.note ?? ""))
+                Text(item.description ?? item.rule.note ?? "")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -208,7 +208,7 @@ struct ContentView: View {
                     walk(children, ancestors: ancestors + [item.pathDescription])
                 } else {
                     let context = (ancestors + [item.pathDescription]).joined(separator: " / ")
-                    let hay = (item.name + " " + item.pathDescription + " " + context + " " + (item.rule.note ?? "") + " " + (item.description ?? "")).lowercased()
+                    let hay = item.pathDescription.lowercased()
                     if hay.contains(q) {
                         var copy = item
                         copy.displayPath = context
@@ -1081,7 +1081,7 @@ struct ContentView: View {
         childItems.sort { $0.sizeBytes > $1.sizeBytes }
 
         let parentRule = CleanRule(
-            name: "Container Leftovers",
+            name: String(localized: "Container Leftovers"),
             pathDescription: basePath,
             iconName: "shippingbox.fill",
             iconColor: .pink,
@@ -1144,7 +1144,7 @@ struct ContentView: View {
                 iconName: cache.icon,
                 iconColor: cache.color,
                 cleanType: .deleteDirectory,
-                note: cache.name
+                note: LocalizedStringKey(cache.name)
             )
             let item = CategoryItem(
                 name: cache.name,
@@ -1221,7 +1221,7 @@ struct ContentView: View {
                 iconName: Self.homeEntryIcons[lower]?.0 ?? Self.homeEntryIcons[normalized]?.0 ?? "folder.badge.minus",
                 iconColor: Self.homeEntryIcons[lower]?.1 ?? Self.homeEntryIcons[normalized]?.1 ?? .pink,
                 cleanType: .deleteDirectoryTree,
-                note: note
+                note: LocalizedStringKey(note)
             )
             let item = CategoryItem(
                 name: entry,
@@ -1389,7 +1389,7 @@ struct ContentView: View {
     }
 
     // Convenience builder for read-only display nodes.
-    private func displayItem(name: String, label: String, icon: String, color: Color, note: String? = nil, children: [CategoryItem]? = nil, sizeBytes: Int64 = 0, finderPath: String? = nil, description: String? = nil) -> CategoryItem {
+    private func displayItem(name: String, label: String, icon: String, color: Color, note: LocalizedStringKey? = nil, children: [CategoryItem]? = nil, sizeBytes: Int64 = 0, finderPath: String? = nil, description: LocalizedStringKey? = nil) -> CategoryItem {
         CategoryItem(
             name: name,
             pathDescription: label,
@@ -1406,13 +1406,13 @@ struct ContentView: View {
     }
 
     // Display parent whose size is the sum of its children's sizes.
-    private func displayParent(name: String, label: String, icon: String, color: Color, note: String? = nil, children: [CategoryItem], finderPath: String? = nil) -> CategoryItem {
+    private func displayParent(name: String, label: String, icon: String, color: Color, note: LocalizedStringKey? = nil, children: [CategoryItem], finderPath: String? = nil) -> CategoryItem {
         let total = children.reduce(Int64(0)) { $0 + $1.sizeBytes }
         return displayItem(name: name, label: label, icon: icon, color: color, note: note, children: children, sizeBytes: total, finderPath: finderPath)
     }
 
     // A read-only leaf module with an optional on-disk size and Finder location.
-    private func leaf(_ name: String, _ size: Int64 = 0, finderPath: String? = nil, description: String? = nil) -> CategoryItem {
+    private func leaf(_ name: String, _ size: Int64 = 0, finderPath: String? = nil, description: LocalizedStringKey? = nil) -> CategoryItem {
         displayItem(name: name, label: name, icon: "circle.fill", color: .secondary, sizeBytes: size, finderPath: finderPath, description: description)
     }
 
@@ -1890,7 +1890,7 @@ struct ContentView: View {
                 color = .secondary
             }
             
-            childItems.append(displayItem(name: entry, label: "~/\(entry)", icon: icon, color: color, sizeBytes: bytes, finderPath: fullPath, description: Self.homeEntryDescriptions[lowerEntry]))
+            childItems.append(displayItem(name: entry, label: "~/\(entry)", icon: icon, color: color, sizeBytes: bytes, finderPath: fullPath, description: Self.homeEntryDescriptions[lowerEntry].map { LocalizedStringKey($0) }))
         }
 
         guard !childItems.isEmpty else { return nil }
