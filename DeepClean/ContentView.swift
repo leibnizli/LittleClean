@@ -116,26 +116,18 @@ struct ContentView: View {
                     Text(item.displayPath ?? item.pathDescription)
                         .font(.system(size: 13))
                 }
-                .contextMenu {
-                    if !item.isDisplayOnly && !item.rule.isCheckboxHidden && item.sizeBytes > 0 {
-                        Button("Clean \(item.name)") {
-                            cleanSingleItem(item)
-                        }
-                    }
-                    
-                    let target = item.isDisplayOnly ? item.finderPath : item.pathDescription
-                    if let target = target, !target.isEmpty {
-                        Button("Reveal in Finder") {
-                            openInFinder(pathDescription: target)
-                        }
-                    }
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .contextMenu { itemContextMenu(item) }
             }
             
             TableColumn("Note") { item in
                 Text(item.description ?? item.rule.note ?? "")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .contextMenu { itemContextMenu(item) }
             }
             .width(min: 80, ideal: 110, max: 150)
 
@@ -143,6 +135,9 @@ struct ContentView: View {
                 Text(item.sizeString)
                     .font(.system(size: 13, design: .rounded))
                     .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .contextMenu { itemContextMenu(item) }
             }
             .width(min: 90, ideal: 110, max: 150)
 
@@ -156,6 +151,14 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderless)
                     .controlSize(.small)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .contentShape(Rectangle())
+                    .contextMenu { itemContextMenu(item) }
+                } else {
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        .contextMenu { itemContextMenu(item) }
                 }
             }
             .width(min: 40, ideal: 50, max: 60)
@@ -177,6 +180,22 @@ struct ContentView: View {
             result[index].children?.sort(using: sortOrder)
         }
         return result
+    }
+
+    @ViewBuilder
+    private func itemContextMenu(_ item: CategoryItem) -> some View {
+        if !item.isDisplayOnly && !item.rule.isCheckboxHidden && item.sizeBytes > 0 {
+            Button("Clean \"\(item.name)\"") {
+                cleanSingleItem(item)
+            }
+        }
+        
+        let target = item.isDisplayOnly ? item.finderPath : item.pathDescription
+        if let target = target, !target.isEmpty {
+            Button("Reveal in Finder") {
+                openInFinder(pathDescription: target)
+            }
+        }
     }
 
     // Flatten the tree to leaf nodes matching `query`, each relabeled with its ancestor chain.
