@@ -116,6 +116,20 @@ struct ContentView: View {
                     Text(item.displayPath ?? item.pathDescription)
                         .font(.system(size: 13))
                 }
+                .contextMenu {
+                    if !item.isDisplayOnly && !item.rule.isCheckboxHidden && item.sizeBytes > 0 {
+                        Button("Clean \(item.name)") {
+                            cleanSingleItem(item)
+                        }
+                    }
+                    
+                    let target = item.isDisplayOnly ? item.finderPath : item.pathDescription
+                    if let target = target, !target.isEmpty {
+                        Button("Reveal in Finder") {
+                            openInFinder(pathDescription: target)
+                        }
+                    }
+                }
             }
             
             TableColumn("Note") { item in
@@ -127,7 +141,7 @@ struct ContentView: View {
 
             TableColumn("Size", value: \.sizeBytes) { item in
                 Text(item.sizeString)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 13, design: .rounded))
                     .foregroundColor(.secondary)
             }
             .width(min: 90, ideal: 110, max: 150)
@@ -1874,6 +1888,37 @@ struct ContentView: View {
                 self.categories = updated
                 self.isCleaning = false
                 self.selectedIDs = []
+                self.loadRealDiskSpace()
+            }
+        }
+    }
+
+    // Clean a single right-clicked item (and its children) without affecting selection state
+    private func cleanSingleItem(_ item: CategoryItem) {
+        // Collect all leaf nodes under this item that are actually cleanable
+        var toClean: [CategoryItem] = []
+        func collectLeaves(_ node: CategoryItem) {
+            if let children = node.children, !children.isEmpty {
+                children.forEach(collectLeaves)
+            } else {
+                toClean.append(node)
+            }
+        }
+        collectLeaves(item)
+        
+        guard !toClean.isEmpty else { return }
+        let cleanedIDs = Set(toClean.map { $0.id })
+        let snapshot = categories
+        isCleaning = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            for cItem in toClean {
+                self.cleanItem(cItem)
+            }
+            let updated = self.rebuildRemeasuringCleanedLeaves(in: snapshot, cleanedIDs: cleanedIDs)
+            DispatchQueue.main.async {
+                self.categories = updated
+                self.isCleaning = false
+                self.selectedIDs.subtract(cleanedIDs)
                 self.loadRealDiskSpace()
             }
         }
