@@ -1,9 +1,15 @@
 import SwiftUI
 
+nonisolated struct CategoryScanResult: Sendable {
+    let categories: [CategoryItem]
+    let containerAccessDenied: Bool
+}
+
 nonisolated struct FileSystemScanner: Sendable {
     // Scan configured paths synchronously. Callers are responsible for running this off the main thread.
-    func scanCategories() -> [CategoryItem] {
+    func scanCategories() -> CategoryScanResult {
         var foundCategories: [CategoryItem] = []
+        var containerAccessDenied = false
         let fileManager = FileManager.default
 
         for rule in CleanConfig.defaultRules {
@@ -17,7 +23,9 @@ nonisolated struct FileSystemScanner: Sendable {
             } else if rule.isDynamicLeftoversRule {
                 foundCategories.append(contentsOf: scanAppLeftovers(basePath: rule.pathDescription))
             } else if rule.isDynamicContainerLeftoversRule {
-                foundCategories.append(contentsOf: scanContainerLeftovers(basePath: rule.pathDescription))
+                let result = scanContainerLeftovers(basePath: rule.pathDescription)
+                foundCategories.append(contentsOf: result.items)
+                containerAccessDenied = result.accessDenied
             } else if rule.isDynamicHomeCleanupRule {
                 var allChildren: [CategoryItem] = []
                 allChildren.append(contentsOf: scanHomeCaches(basePath: rule.pathDescription))
@@ -53,7 +61,10 @@ nonisolated struct FileSystemScanner: Sendable {
             }
         }
 
-        return foundCategories
+        return CategoryScanResult(
+            categories: foundCategories,
+            containerAccessDenied: containerAccessDenied
+        )
     }
 
     // Build read-only informational sections synchronously on a background queue.
@@ -650,11 +661,11 @@ nonisolated struct FileSystemScanner: Sendable {
     // plist is read so UUID-named containers resolve correctly. com.apple.* system
     // containers are always skipped. Remaining containers whose bundle id matches
     // no installed app (or its extensions) are listed as cleanable leftovers.
-    private func scanContainerLeftovers(basePath: String) -> [CategoryItem] {
+    private func scanContainerLeftovers(basePath: String) -> (items: [CategoryItem], accessDenied: Bool) {
         let expandedBasePath = NSString(string: basePath).expandingTildeInPath
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(atPath: expandedBasePath) else {
-            return []
+            return ([], false)
         }
 
         let installedApps = fetchInstalledAppIdentifiers()
@@ -671,11 +682,26 @@ nonisolated struct FileSystemScanner: Sendable {
             // falling back to the folder name. UUID-named containers rely on the plist.
             let metadataPlist = (fullPath as NSString).appendingPathComponent(".com.apple.containermanagerd.metadata.plist")
             var bundleID = entry
-            if let data = try? Data(contentsOf: URL(fileURLWithPath: metadataPlist)),
-               let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
-               let identifier = plist["MCMMetadataIdentifier"] as? String,
-               !identifier.isEmpty {
-                bundleID = identifier
+            do {
+                let data = try Data(contentsOf: URL(fileURLWithPath: metadataPlist))
+                if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+                   let identifier = plist["MCMMetadataIdentifier"] as? String,
+                   !identifier.isEmpty {
+                    bundleID = identifier
+                }
+            } catch {
+                let nsError = error as NSError
+                let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+                let underlyingPermissionDenied = underlyingError.map {
+                    $0.domain == NSPOSIXErrorDomain
+                        && ($0.code == POSIXErrorCode.EPERM.rawValue
+                            || $0.code == POSIXErrorCode.EACCES.rawValue)
+                } ?? false
+                let permissionDenied = nsError.code == NSFileReadNoPermissionError
+                    || underlyingPermissionDenied
+                if permissionDenied {
+                    return ([], true)
+                }
             }
 
             let lowerBundle = bundleID.lowercased()
@@ -717,7 +743,7 @@ nonisolated struct FileSystemScanner: Sendable {
             }
         }
 
-        guard !childItems.isEmpty else { return [] }
+        guard !childItems.isEmpty else { return ([], false) }
 
         childItems.sort { $0.sizeBytes > $1.sizeBytes }
 
@@ -742,7 +768,7 @@ nonisolated struct FileSystemScanner: Sendable {
             children: childItems
         )
 
-        return [parentItem]
+        return ([parentItem], false)
     }
 
     // Scan known tool cache locations under the home directory
@@ -1483,7 +1509,7 @@ nonisolated struct FileSystemScanner: Sendable {
         // section (e.g. ~/.cargo, ~/go, ~/.nvm) so the same data isn't shown twice.
         let coveredPaths = homeDirectoryEntryPaths()
         let filteredToolNodes = filterHomeCoveredNodes(toolNodes, coveredPaths: coveredPaths)
-        return displayParent(name: "Installed Tools", label: "Installed Tools", icon: "terminal.fill", color: .secondary, note: "Read Only", children: filteredToolNodes)
+        return displayParent(name: "Installed Tools", label: "Installed Tools", icon: "terminal.fill", color: .primary, note: "Read Only", children: filteredToolNodes)
     }
 
     // Enumerate every non-system entry (file or folder, hidden or visible) directly under the
@@ -1540,7 +1566,7 @@ nonisolated struct FileSystemScanner: Sendable {
         guard !childItems.isEmpty else { return nil }
         childItems.sort { $0.sizeBytes > $1.sizeBytes }
 
-        return displayParent(name: "Home Directory", label: "Home Directory", icon: "house.fill", color: .secondary, note: "Non-system Items", children: childItems)
+        return displayParent(name: "Home Directory", label: "Home Directory", icon: "house.fill", color: .primary, note: "Non-system Items", children: childItems)
     }
 
     // Mirror of scanAppLeftovers, but lists Application Support folders that belong to

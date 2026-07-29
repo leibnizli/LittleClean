@@ -1,5 +1,17 @@
 import Foundation
 
+nonisolated struct CleanFailure: Sendable {
+    let path: String
+    let domain: String
+    let code: Int
+    let reason: String
+}
+
+nonisolated struct CleanResult: Sendable {
+    let categories: [CategoryItem]
+    let failures: [CleanFailure]
+}
+
 nonisolated struct Cleaner: Sendable {
     private let scanner: FileSystemScanner
 
@@ -8,17 +20,33 @@ nonisolated struct Cleaner: Sendable {
     }
 
     // Delete the supplied items and synchronously remeasure affected leaves and parent totals.
-    func clean(_ items: [CategoryItem], in snapshot: [CategoryItem]) -> [CategoryItem] {
+    func clean(_ items: [CategoryItem], in snapshot: [CategoryItem]) -> CleanResult {
+        var failures: [CleanFailure] = []
         for item in items {
-            cleanItem(item)
+            failures.append(contentsOf: cleanItem(item))
         }
-        return rebuildRemeasuringCleanedLeaves(
-            in: snapshot,
-            cleanedIDs: Set(items.map { $0.id })
+        return CleanResult(
+            categories: rebuildRemeasuringCleanedLeaves(
+                in: snapshot,
+                cleanedIDs: Set(items.map { $0.id })
+            ),
+            failures: failures
         )
     }
 
-    private func cleanItem(_ item: CategoryItem) {
+    private func cleanItem(_ item: CategoryItem) -> [CleanFailure] {
+        var failures: [CleanFailure] = []
+
+        func recordFailure(_ error: Error, path: String) {
+            let nsError = error as NSError
+            failures.append(CleanFailure(
+                path: path,
+                domain: nsError.domain,
+                code: nsError.code,
+                reason: nsError.localizedDescription
+            ))
+        }
+
         switch item.rule.cleanType {
         case .none:
             break
@@ -28,24 +56,50 @@ nonisolated struct Cleaner: Sendable {
             if let contents = try? fileManager.contentsOfDirectory(atPath: expandedPath) {
                 for file in contents {
                     let fullPath = (expandedPath as NSString).appendingPathComponent(file)
-                    try? fileManager.removeItem(atPath: fullPath)
+                    do {
+                        try fileManager.removeItem(atPath: fullPath)
+                    } catch {
+                        recordFailure(error, path: fullPath)
+                    }
                 }
             }
         case .deleteDirectoryTree:
             let treePath = NSString(string: item.pathDescription).expandingTildeInPath
-            try? FileManager.default.removeItem(atPath: treePath)
+            do {
+                try FileManager.default.removeItem(atPath: treePath)
+            } catch {
+                recordFailure(error, path: treePath)
+            }
         case .deletePaths(let paths):
             let fileManager = FileManager.default
             for path in paths {
-                try? fileManager.removeItem(atPath: path)
+                do {
+                    try fileManager.removeItem(atPath: path)
+                } catch {
+                    recordFailure(error, path: path)
+                }
             }
         case .runCommand(let executable, let args):
             let process = Process()
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = args
-            try? process.run()
-            process.waitUntilExit()
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus != 0 {
+                    failures.append(CleanFailure(
+                        path: item.pathDescription,
+                        domain: "Process",
+                        code: Int(process.terminationStatus),
+                        reason: "\(executable) exited with status \(process.terminationStatus)"
+                    ))
+                }
+            } catch {
+                recordFailure(error, path: item.pathDescription)
+            }
         }
+
+        return failures
     }
 
     private func rebuildRemeasuringCleanedLeaves(

@@ -19,6 +19,25 @@ struct ContentView: View {
             viewModel.checkForUpdates()
         }
         .searchable(text: $viewModel.searchText, prompt: "Search")
+        .alert(
+            "Deletion Failed",
+            isPresented: Binding(
+                get: { viewModel.cleaningErrorMessage != nil },
+                set: { if !$0 { viewModel.cleaningErrorMessage = nil } }
+            )
+        ) {
+            if viewModel.needsFullDiskAccess {
+                Button("Open Full Disk Access Settings") {
+                    viewModel.openFullDiskAccessSettings()
+                    viewModel.cleaningErrorMessage = nil
+                }
+            }
+            Button("OK", role: .cancel) {
+                viewModel.cleaningErrorMessage = nil
+            }
+        } message: {
+            Text(viewModel.cleaningErrorMessage ?? "")
+        }
     }
 
     // MARK: - Cleanable Directory Outline Table
@@ -137,6 +156,19 @@ struct ContentView: View {
             Text("Free \(formatBytes(viewModel.freeBytes))")
                 .foregroundColor(.green)
                 .font(.system(size: 12))
+
+            if viewModel.needsFullDiskAccess {
+                Button {
+                    viewModel.openFullDiskAccessSettings()
+                } label: {
+                    Label("Enable Full Disk Access", systemImage: "lock.shield.fill")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.orange)
+                .help("Open Full Disk Access Settings")
+            }
+
             Spacer()
 
             if viewModel.isScanning {

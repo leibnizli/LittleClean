@@ -11,6 +11,8 @@ final class ContentViewModel: ObservableObject {
     @Published var isCleaning = false
     @Published var isLoadingDetails = false
     @Published var newVersionURL: String?
+    @Published var cleaningErrorMessage: String?
+    @Published var needsFullDiskAccess = false
     @Published var categories: [CategoryItem] = []
     @Published var sortOrder: [KeyPathComparator<CategoryItem>] = [
         KeyPathComparator(\.sizeBytes, order: .reverse)
@@ -60,10 +62,11 @@ final class ContentViewModel: ObservableObject {
 
         let scanner = scanner
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let foundCategories = scanner.scanCategories()
+            let result = scanner.scanCategories()
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.categories = foundCategories
+                self.categories = result.categories
+                self.needsFullDiskAccess = result.containerAccessDenied
                 self.selectedIDs = []
                 self.isScanning = false
                 self.loadDetails()
@@ -149,6 +152,13 @@ final class ContentViewModel: ObservableObject {
         }
     }
 
+    func openFullDiskAccessSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+        ) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     private func loadDetails() {
         detailsLoadToken += 1
         let token = detailsLoadToken
@@ -202,13 +212,20 @@ final class ContentViewModel: ObservableObject {
         let snapshot = categories
         let cleaner = cleaner
         isCleaning = true
+        cleaningErrorMessage = nil
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let updated = cleaner.clean(items, in: snapshot)
+            let result = cleaner.clean(items, in: snapshot)
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.categories = updated
+                self.categories = result.categories
                 self.isCleaning = false
+                if items.contains(where: { self.isProtectedContainerPath($0.pathDescription) }) {
+                    self.needsFullDiskAccess = result.failures.contains(where: self.requiresFullDiskAccess)
+                }
+                if !result.failures.isEmpty {
+                    self.cleaningErrorMessage = self.cleanFailureMessage(result.failures)
+                }
                 if clearingAllSelection {
                     self.selectedIDs = []
                 } else {
@@ -217,6 +234,37 @@ final class ContentViewModel: ObservableObject {
                 self.loadRealDiskSpace()
             }
         }
+    }
+
+    private func cleanFailureMessage(_ failures: [CleanFailure]) -> String {
+        let requiresAccess = failures.contains(where: requiresFullDiskAccess)
+        let displayedFailures = failures.prefix(8).map { failure in
+            "\(failure.path)\n\(failure.domain) (\(failure.code)): \(failure.reason)"
+        }
+        var message = displayedFailures.joined(separator: "\n\n")
+        if requiresAccess {
+            let guidance = String(localized: "macOS blocked access to another app's protected container. Grant DeepClean Full Disk Access, then quit and reopen the app.")
+            message = "\(guidance)\n\n\(message)"
+        }
+        if failures.count > displayedFailures.count {
+            message += "\n\n… \(failures.count - displayedFailures.count) more errors"
+        }
+        return message
+    }
+
+    private func requiresFullDiskAccess(_ failure: CleanFailure) -> Bool {
+        failure.domain == NSCocoaErrorDomain
+            && failure.code == NSFileWriteNoPermissionError
+            && isProtectedContainerPath(failure.path)
+    }
+
+    private func isProtectedContainerPath(_ path: String) -> Bool {
+        let expandedPath = NSString(string: path).expandingTildeInPath
+        let libraryPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library")
+            .path
+        return expandedPath.hasPrefix("\(libraryPath)/Containers/")
+            || expandedPath.hasPrefix("\(libraryPath)/Group Containers/")
     }
 
     private func flatFilteredLeaves(_ items: [CategoryItem], query: String) -> [CategoryItem] {

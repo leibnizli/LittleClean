@@ -92,7 +92,27 @@
         }
       }
     },
+    "Deletion Failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除失败"
+          }
+        }
+      }
+    },
     "Docker Data" : {},
+    "Enable Full Disk Access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启完全磁盘访问权限"
+          }
+        }
+      }
+    },
     "Free %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -155,6 +175,16 @@
         }
       }
     },
+    "Open Full Disk Access Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开完全磁盘访问权限设置"
+          }
+        }
+      }
+    },
     "Path" : {
       "localizations" : {
         "zh-Hans" : {
@@ -172,6 +202,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在访达中显示"
+          }
+        }
+      }
+    },
+    "OK" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
           }
         }
       }
@@ -273,6 +313,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "官方网站"
+          }
+        }
+      }
+    },
+    "macOS blocked access to another app's protected container. Grant DeepClean Full Disk Access, then quit and reopen the app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 阻止了对其他应用受保护容器的访问。请授予 DeepClean 完全磁盘访问权限，然后退出并重新打开应用。"
           }
         }
       }
