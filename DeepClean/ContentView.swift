@@ -930,7 +930,8 @@ struct ContentView: View {
             ".config", ".cache", ".local", ".ssh", ".gnupg", ".aws", ".kube",
             ".docker", ".android", ".gradle", ".m2", ".ivy2", ".cargo", ".rustup",
             ".npm", ".pnpm-store", ".yarn", ".gem", ".cocoapods",
-            ".bun", ".deno", ".node-gyp",
+            ".bun", ".deno", ".node-gyp", ".nvm", ".fnm", ".volta",
+            ".asdf", ".pyenv", ".sdkman",
             ".ds_store", ".localized", ".cfusertextencoding", ".fseventsd",
             ".spotlight-v100", ".documentrevisions-v100", ".pkinstallsandboxmanager",
             ".vol", ".file", ".hotfiles.btree", ".trash", ".temporaryitems"
