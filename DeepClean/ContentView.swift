@@ -163,7 +163,7 @@ struct ContentView: View {
                 } label: {
                     Label("Enable Full Disk Access", systemImage: "lock.shield.fill")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(.orange)
                 .help("Open Full Disk Access Settings")
