@@ -114,7 +114,8 @@ nonisolated struct FileSystemScanner: Sendable {
             iconName: "exclamationmark.triangle.fill",
             iconColor: .orange,
             cleanType: .none,
-            note: "\(versionGroups.keys.count) Versions"
+            note: "\(versionGroups.keys.count) Versions",
+            isCheckboxHidden: true
         )
 
         let item = CategoryItem(
@@ -231,7 +232,8 @@ nonisolated struct FileSystemScanner: Sendable {
             iconName: "iphone.slash",
             iconColor: .red,
             cleanType: .none,
-            note: "Missing Runtime"
+            note: "Missing Runtime",
+            isCheckboxHidden: true
         )
         let parent = CategoryItem(
             name: parentRule.name,
@@ -623,7 +625,8 @@ nonisolated struct FileSystemScanner: Sendable {
             iconName: "folder.badge.minus",
             iconColor: .pink,
             cleanType: .none,
-            note: "App Leftovers"
+            note: "App Leftovers",
+            isCheckboxHidden: true
         )
 
         let parentItem = CategoryItem(
@@ -726,7 +729,8 @@ nonisolated struct FileSystemScanner: Sendable {
             iconName: "shippingbox.fill",
             iconColor: .pink,
             cleanType: .none,
-            note: "App Leftovers"
+            note: "App Leftovers",
+            isCheckboxHidden: true
         )
 
         let parentItem = CategoryItem(

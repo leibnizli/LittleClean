@@ -38,28 +38,32 @@ nonisolated struct CleanConfig {
             pathDescription: "~/Library/Developer/CoreSimulator/Devices",
             iconName: "iphone.badge.play",
             iconColor: .purple,
-            isDynamicSimulatorRule: true
+            isDynamicSimulatorRule: true,
+            isCheckboxHidden: true
         ),
         CleanRule(
             name: "Unavailable Simulators",
             pathDescription: "~/Library/Developer/CoreSimulator/Devices",
             iconName: "iphone.slash",
             iconColor: .red,
-            isDynamicUnavailableSimulatorRule: true
+            isDynamicUnavailableSimulatorRule: true,
+            isCheckboxHidden: true
         ),
         CleanRule(
             name: "Uninstalled App Leftovers",
             pathDescription: "~/Library/Application Support",
             iconName: "folder.badge.minus",
             iconColor: .pink,
-            isDynamicLeftoversRule: true
+            isDynamicLeftoversRule: true,
+            isCheckboxHidden: true
         ),
         CleanRule(
             name: "Container Leftovers",
             pathDescription: "~/Library/Containers",
             iconName: "shippingbox.fill",
             iconColor: .pink,
-            isDynamicContainerLeftoversRule: true
+            isDynamicContainerLeftoversRule: true,
+            isCheckboxHidden: true
         ),
         CleanRule(name: "Saved App State", pathDescription: "~/Library/Saved Application State", iconName: "clock.arrow.circlepath", iconColor: .mint, note: "Saved App State"),
         CleanRule(
