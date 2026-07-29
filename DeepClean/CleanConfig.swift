@@ -52,7 +52,7 @@ nonisolated struct CleanConfig {
         CleanRule(
             name: "Uninstalled App Leftovers",
             pathDescription: "~/Library/Application Support",
-            iconName: "folder.badge.minus",
+            iconName: "folder.fill",
             iconColor: .pink,
             isDynamicLeftoversRule: true,
             isCheckboxHidden: true

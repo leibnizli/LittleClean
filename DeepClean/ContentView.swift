@@ -26,7 +26,11 @@ struct ContentView: View {
         Table(viewModel.displayedCategories, children: \.children, sortOrder: $viewModel.sortOrder) {
             TableColumn("Path", value: \.pathDescription) { item in
                 HStack(alignment: .center, spacing: 6) {
-                    if item.isDisplayOnly || item.rule.isCheckboxHidden {
+                    if let children = item.children, !children.isEmpty {
+                        Image(systemName: "folder.fill")
+                            .foregroundColor(.blue)
+                            .frame(width: 16)
+                    } else if item.isDisplayOnly || item.rule.isCheckboxHidden {
                         Image(systemName: item.iconName)
                             .foregroundColor(item.iconColor)
                             .frame(width: 16)

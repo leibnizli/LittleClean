@@ -622,7 +622,7 @@ nonisolated struct FileSystemScanner: Sendable {
         let parentRule = CleanRule(
             name: "Uninstalled App Leftovers",
             pathDescription: basePath,
-            iconName: "folder.badge.minus",
+            iconName: "folder.fill",
             iconColor: .pink,
             cleanType: .none,
             note: "App Leftovers",
@@ -703,7 +703,7 @@ nonisolated struct FileSystemScanner: Sendable {
                     iconName: "shippingbox.fill",
                     iconColor: .pink,
                     cleanType: .deleteDirectoryTree,
-                    note: "App Leftovers"
+                    note: "Container Leftovers"
                 )
 
                 let childItem = CategoryItem(
@@ -729,7 +729,7 @@ nonisolated struct FileSystemScanner: Sendable {
             iconName: "shippingbox.fill",
             iconColor: .pink,
             cleanType: .none,
-            note: "App Leftovers",
+            note: "Container Leftovers",
             isCheckboxHidden: true
         )
 
