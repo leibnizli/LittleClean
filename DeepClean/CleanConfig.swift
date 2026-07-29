@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum CleanType: Equatable {
+nonisolated enum CleanType: Equatable, Sendable {
     case none
     case deleteDirectory        // clear contents, keep the folder (caches)
     case deleteDirectoryTree    // remove the folder entirely (leftovers)
@@ -8,7 +8,8 @@ enum CleanType: Equatable {
     case runCommand(executable: String, args: [String])
 }
 
-struct CleanRule: Identifiable {
+// LocalizedStringKey is immutable but does not declare Sendable in SwiftUI.
+nonisolated struct CleanRule: Identifiable, @unchecked Sendable {
     let id = UUID()
     let name: String
     let pathDescription: String // e.g. "~/Library/Caches"
@@ -24,7 +25,7 @@ struct CleanRule: Identifiable {
     var isCheckboxHidden: Bool = false
 }
 
-struct CleanConfig {
+nonisolated struct CleanConfig {
     static let defaultRules: [CleanRule] = [
         CleanRule(name: "App Caches", pathDescription: "~/Library/Caches", iconName: "archivebox.fill", iconColor: .orange, note: "App Caches"),
         CleanRule(name: "System Logs", pathDescription: "~/Library/Logs", iconName: "doc.text.fill", iconColor: .blue, note: "System Logs"),
