@@ -2479,7 +2479,7 @@ nonisolated struct FileSystemScanner: Sendable {
         guard !childItems.isEmpty else { return nil }
         childItems.sort { $0.sizeBytes > $1.sizeBytes }
 
-        return displayParent(name: "Home Directory", label: "Home Directory", icon: "house.fill", color: .primary, note: "Non-system Items", children: childItems)
+        return displayParent(name: "Home Directory", label: "Home Directory", icon: "folder.fill", color: .blue, note: "Non-system Items", children: childItems)
     }
 
     // Mirror of scanAppLeftovers, but lists Application Support folders that belong to
