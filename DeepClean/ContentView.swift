@@ -97,7 +97,7 @@ struct ContentView: View {
                     .contentShape(Rectangle())
                     .contextMenu { itemContextMenu(item) }
             }
-            .width(min: 80, ideal: 110, max: 150)
+            .width(min: 100, ideal: 180, max: 320)
 
             TableColumn("Size", value: \.sizeBytes) { item in
                 Text(item.sizeString)

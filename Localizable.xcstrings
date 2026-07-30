@@ -4,6 +4,16 @@
     "" : {
 
     },
+    "%@ · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$@"
+          }
+        }
+      }
+    },
     "%@ / %@" : {
       "localizations" : {
         "en" : {
@@ -68,6 +78,7 @@
       }
     },
     "Browser Bridge" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -78,6 +89,7 @@
       }
     },
     "Cache" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -134,6 +146,7 @@
 
     },
     "Crash Reports" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -248,6 +261,7 @@
       }
     },
     "Keys & Licenses" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -258,6 +272,7 @@
       }
     },
     "Logs" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -284,6 +299,7 @@
 
     },
     "Mixed Data" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -464,6 +480,7 @@
       }
     },
     "Settings" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -504,6 +521,7 @@
       }
     },
     "Telemetry" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -517,6 +535,7 @@
 
     },
     "Updater" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -527,6 +546,7 @@
       }
     },
     "User Data" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {

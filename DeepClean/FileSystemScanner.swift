@@ -1123,7 +1123,7 @@ nonisolated struct FileSystemScanner: Sendable {
             }
         }
 
-        var note: LocalizedStringKey {
+        var noteKey: String {
             switch self {
             case .keysAndLicenses: return "Keys & Licenses"
             case .userData: return "User Data"
@@ -1136,6 +1136,90 @@ nonisolated struct FileSystemScanner: Sendable {
             case .settings: return "Settings"
             }
         }
+
+        var localizedName: String {
+            NSLocalizedString(noteKey, comment: "")
+        }
+
+        var note: LocalizedStringKey {
+            LocalizedStringKey(noteKey)
+        }
+    }
+
+    private func resolveAppName(for identifier: String, path: String) -> String? {
+        let fileManager = FileManager.default
+
+        // 1. If identifier looks like a bundle id (e.g. com.tencent.xinWeChat, com.apple.Safari)
+        if identifier.contains(".") && !identifier.hasPrefix(".") {
+            let cleanID = identifier.trimmingCharacters(in: .whitespaces)
+            var bundleID = cleanID
+            let components = cleanID.split(separator: ".")
+            if let first = components.first, first.count == 10, first.allSatisfy({ $0.isUppercase || $0.isNumber }) {
+                bundleID = components.dropFirst().joined(separator: ".")
+            }
+
+            var candidateID = bundleID
+            while !candidateID.isEmpty {
+                if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: candidateID) {
+                    let displayName = fileManager.displayName(atPath: url.path)
+                    let name = (displayName as NSString).deletingPathExtension
+                    if !name.isEmpty {
+                        return name
+                    }
+                }
+                let parts = candidateID.split(separator: ".")
+                if parts.count > 2 {
+                    candidateID = parts.dropLast().joined(separator: ".")
+                } else {
+                    break
+                }
+            }
+
+            // Check parent folder if path has parent info (e.g., ~/Library/Application Support/Google/Chrome -> Google Chrome)
+            let pathComponents = (path as NSString).pathComponents
+            if pathComponents.count >= 2 {
+                let parent = pathComponents[pathComponents.count - 2]
+                let lowerParent = parent.lowercased()
+                if !lowerParent.contains("application support") && !lowerParent.contains("containers") && !lowerParent.contains("caches") && !lowerParent.hasPrefix("~") {
+                    return "\(parent) \(identifier)"
+                }
+            }
+
+            // Fallback: parse last component of bundle ID into readable name
+            if let last = components.last {
+                let cleanLast = String(last)
+                    .replacingOccurrences(of: "-", with: " ")
+                    .replacingOccurrences(of: "_", with: " ")
+                let words = cleanLast.split(separator: " ").map { $0.capitalized }.joined(separator: " ")
+                let lowerWords = words.lowercased()
+                if !words.isEmpty && lowerWords != "app" && lowerWords != "mac" && lowerWords != "helper" {
+                    if components.count >= 2 {
+                        let vendor = String(components[1]).capitalized
+                        let lowerVendor = vendor.lowercased()
+                        if lowerVendor != "com" && lowerVendor != "org" && lowerVendor != "net" && lowerVendor != lowerWords {
+                            return "\(vendor) \(words)"
+                        }
+                    }
+                    return words
+                }
+            }
+        }
+
+        // 2. Check if parent folder carries product brand (e.g., Google/Chrome)
+        let pathComponents = (path as NSString).pathComponents
+        if pathComponents.count >= 2 {
+            let parent = pathComponents[pathComponents.count - 2]
+            let lowerParent = parent.lowercased()
+            if !lowerParent.contains("application support") &&
+               !lowerParent.contains("containers") &&
+               !lowerParent.contains("caches") &&
+               !lowerParent.contains("library") &&
+               !lowerParent.hasPrefix("~") {
+                return "\(parent) \(identifier)"
+            }
+        }
+
+        return identifier
     }
 
     // Describe only the kinds of content found in a directory. This classification is
@@ -1145,7 +1229,11 @@ nonisolated struct FileSystemScanner: Sendable {
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(atPath: path) else { return nil }
         let ignoredMetadata = Set([".ds_store", ".localized"])
-        guard entries.contains(where: { !ignoredMetadata.contains($0.lowercased()) }) else {
+        let filteredEntries = entries.filter {
+            let lower = $0.lowercased()
+            return !ignoredMetadata.contains(lower) && !lower.hasPrefix(".") && !lower.hasSuffix("_lock")
+        }
+        guard !filteredEntries.isEmpty else {
             return "Empty"
         }
 
@@ -1289,6 +1377,33 @@ nonisolated struct FileSystemScanner: Sendable {
             }
         }
 
+        // Extract top-level subfolders and files to give real content context
+        var topSubfolders: [String] = []
+        var topFiles: [String] = []
+        for entry in filteredEntries {
+            let fullEntryPath = (path as NSString).appendingPathComponent(entry)
+            var isDir: ObjCBool = false
+            if fileManager.fileExists(atPath: fullEntryPath, isDirectory: &isDir) {
+                if isDir.boolValue {
+                    topSubfolders.append(entry)
+                } else {
+                    topFiles.append(entry)
+                }
+            }
+        }
+
+        func formatSample(from items: [String], maxItems: Int = 3) -> String {
+            if items.isEmpty { return "" }
+            let sample = items.prefix(maxItems)
+            let joined = sample.joined(separator: ", ")
+            if items.count > maxItems {
+                return "\(joined) (+\(items.count - maxItems))"
+            }
+            return joined
+        }
+
+        let prominentItems = !topSubfolders.isEmpty ? topSubfolders : topFiles
+
         let ranked = scores
             .filter { $0.value > 0 }
             .sorted {
@@ -1298,14 +1413,44 @@ nonisolated struct FileSystemScanner: Sendable {
                 return $0.value > $1.value
             }
 
-        guard let strongest = ranked.first else { return "App Data" }
-        if ranked.count > 1 {
-            let secondScore = ranked[1].value
-            if secondScore >= 6, secondScore * 5 >= strongest.value * 3 {
-                return "Mixed Data"
+        let folderName = (path as NSString).lastPathComponent
+        let resolvedApp = resolveAppName(for: folderName, path: path)
+
+        func buildNote(body: String) -> LocalizedStringKey {
+            if let app = resolvedApp, !app.isEmpty, app.lowercased() != body.lowercased() {
+                return LocalizedStringKey("\(app) · \(body)")
             }
+            return LocalizedStringKey(body)
         }
-        return strongest.key.note
+
+        if !ranked.isEmpty {
+            if ranked.count == 1 {
+                let singleCatName = ranked[0].key.localizedName
+                let sample = formatSample(from: prominentItems, maxItems: 3)
+                let body: String
+                if !sample.isEmpty && sample.lowercased() != singleCatName.lowercased() {
+                    body = "\(singleCatName) (\(sample))"
+                } else {
+                    body = singleCatName
+                }
+                return buildNote(body: body)
+            } else {
+                let catNames = ranked.prefix(3).map { $0.key.localizedName }
+                let catJoined = catNames.joined(separator: " · ")
+                let sample = formatSample(from: prominentItems, maxItems: 2)
+                let body: String
+                if !sample.isEmpty {
+                    body = "\(catJoined) (\(sample))"
+                } else {
+                    body = catJoined
+                }
+                return buildNote(body: body)
+            }
+        } else {
+            let sample = formatSample(from: prominentItems, maxItems: 3)
+            let body = !sample.isEmpty ? sample : "App Data"
+            return buildNote(body: body)
+        }
     }
 
     // Dynamically scan for folders in Application Support that belong to UNINSTALLED applications
@@ -2417,7 +2562,7 @@ nonisolated struct FileSystemScanner: Sendable {
             guard sizeBytes > 50_000_000 else { continue }
 
             let displayPath = "\(basePath)/\(folder)"
-            childItems.append(displayItem(name: folder, label: displayPath, icon: "folder.fill", color: .blue, sizeBytes: sizeBytes, finderPath: fullPath))
+            childItems.append(displayItem(name: folder, label: displayPath, icon: "folder.fill", color: .blue, note: describeDirectoryContents(at: fullPath), sizeBytes: sizeBytes, finderPath: fullPath))
         }
 
         guard !childItems.isEmpty else { return nil }
