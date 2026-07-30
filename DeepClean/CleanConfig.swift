@@ -5,10 +5,6 @@ nonisolated enum ScanMode: String, CaseIterable, Hashable, Identifiable, Sendabl
     case deepAnalysis
 
     var id: String { rawValue }
-
-    func includes(_ minimumMode: ScanMode) -> Bool {
-        self == .deepAnalysis || minimumMode == .safeCleanup
-    }
 }
 
 nonisolated enum CleanType: Equatable, Sendable {
@@ -34,7 +30,7 @@ nonisolated struct CleanRule: Identifiable, @unchecked Sendable {
     var isDynamicUnavailableSimulatorRule: Bool = false
     var isDynamicContainerLeftoversRule: Bool = false
     var isCheckboxHidden: Bool = false
-    var minimumScanMode: ScanMode = .safeCleanup
+    var scanMode: ScanMode = .safeCleanup
 }
 
 nonisolated struct CleanConfig {
@@ -49,7 +45,7 @@ nonisolated struct CleanConfig {
             iconName: "archivebox",
             iconColor: .indigo,
             note: "Xcode Archives",
-            minimumScanMode: .deepAnalysis
+            scanMode: .deepAnalysis
         ),
         CleanRule(name: "iOS Simulator Caches", pathDescription: "~/Library/Developer/CoreSimulator/Caches", iconName: "iphone", iconColor: .teal, note: "iOS Simulator Caches"),
         CleanRule(
@@ -59,7 +55,7 @@ nonisolated struct CleanConfig {
             iconColor: .purple,
             isDynamicSimulatorRule: true,
             isCheckboxHidden: true,
-            minimumScanMode: .deepAnalysis
+            scanMode: .deepAnalysis
         ),
         CleanRule(
             name: "Unavailable Simulators",
@@ -68,7 +64,7 @@ nonisolated struct CleanConfig {
             iconColor: .red,
             isDynamicUnavailableSimulatorRule: true,
             isCheckboxHidden: true,
-            minimumScanMode: .deepAnalysis
+            scanMode: .safeCleanup
         ),
         CleanRule(
             name: "Uninstalled App Leftovers",
@@ -77,7 +73,7 @@ nonisolated struct CleanConfig {
             iconColor: .pink,
             isDynamicLeftoversRule: true,
             isCheckboxHidden: true,
-            minimumScanMode: .deepAnalysis
+            scanMode: .safeCleanup
         ),
         CleanRule(
             name: "Container Leftovers",
@@ -86,7 +82,7 @@ nonisolated struct CleanConfig {
             iconColor: .pink,
             isDynamicContainerLeftoversRule: true,
             isCheckboxHidden: true,
-            minimumScanMode: .deepAnalysis
+            scanMode: .safeCleanup
         ),
         CleanRule(name: "Saved App State", pathDescription: "~/Library/Saved Application State", iconName: "clock.arrow.circlepath", iconColor: .mint, note: "Saved App State"),
         CleanRule(

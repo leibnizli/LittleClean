@@ -1,7 +1,617 @@
+import AppKit
 import SwiftUI
+
+private nonisolated func normalizeAppIdentifier(_ str: String) -> String {
+    str.lowercased()
+        .replacingOccurrences(of: "-", with: "")
+        .replacingOccurrences(of: "_", with: "")
+        .replacingOccurrences(of: " ", with: "")
+        .replacingOccurrences(of: ".", with: "")
+}
+
+// A snapshot of what is currently installed, used to tell "still in use" from "leftover".
+// Building it walks every application bundle on the system and reads its plists, so it is
+// cached across a scan pass instead of being rebuilt by each of the four scans that ask.
+private nonisolated final class InstalledAppIndex: @unchecked Sendable {
+    static let shared = InstalledAppIndex()
+
+    // Long enough for one pass (categories + details) to share a snapshot, short enough
+    // that installing or deleting an app is reflected by the next scan.
+    private static let cacheLifetime: TimeInterval = 15
+    private static let maxSearchDepth = 4
+
+    // Walked recursively: apps are routinely filed into subfolders, Setapp installs into
+    // /Applications/Setapp, and CoreServices nests system apps several levels down.
+    private static let searchRoots: [String] = [
+        "/Applications",
+        "/System/Applications",
+        "/System/Library/CoreServices",
+        (NSHomeDirectory() as NSString).appendingPathComponent("Applications")
+    ]
+
+    private let lock = NSLock()
+    private var cachedIdentifiers: Set<String>?
+    private var cachedAt = Date.distantPast
+    private var bundleIdentifierResults: [String: Bool] = [:]
+
+    func installedIdentifiers() -> Set<String> {
+        lock.lock()
+        if let cachedIdentifiers, Date().timeIntervalSince(cachedAt) < Self.cacheLifetime {
+            lock.unlock()
+            return cachedIdentifiers
+        }
+        lock.unlock()
+
+        let identifiers = Self.buildIdentifiers()
+
+        lock.lock()
+        cachedIdentifiers = identifiers
+        cachedAt = Date()
+        lock.unlock()
+
+        return identifiers
+    }
+
+    // LaunchServices knows where every registered bundle id actually lives, including
+    // apps on other volumes and helpers or extensions nested inside another bundle --
+    // places the directory walk deliberately never descends into.
+    func isRegisteredBundleIdentifier(_ candidate: String) -> Bool {
+        guard candidate.contains("."),
+              !candidate.hasPrefix("."),
+              !candidate.hasSuffix("."),
+              !candidate.contains(" "),
+              !candidate.contains("/") else {
+            return false
+        }
+
+        lock.lock()
+        if let cached = bundleIdentifierResults[candidate] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let resolved = Self.resolveOwningApp(candidate)
+
+        lock.lock()
+        bundleIdentifierResults[candidate] = resolved
+        lock.unlock()
+
+        return resolved
+    }
+
+    private static func resolveOwningApp(_ candidate: String) -> Bool {
+        var components = candidate.split(separator: ".").map(String.init)
+
+        // Group containers are prefixed with the developer's 10-character team id.
+        if let first = components.first,
+           first.count == 10,
+           first.allSatisfy({ $0.isUppercase || $0.isNumber }) {
+            components.removeFirst()
+        }
+
+        // Extension and helper identifiers extend the owning app's id with extra
+        // components ("com.foo.Bar.ShareExtension"), so walk back toward the app.
+        while components.count >= 2 {
+            if isRegistered(components.joined(separator: ".")) {
+                return true
+            }
+            components.removeLast()
+        }
+
+        return false
+    }
+
+    private static func isRegistered(_ bundleID: String) -> Bool {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return false
+        }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    private static func buildIdentifiers() -> Set<String> {
+        var identifiers = Set<String>()
+        let fileManager = FileManager.default
+
+        for root in searchRoots {
+            for bundleURL in appBundles(in: root) {
+                // 1. Finder display name (e.g. "WeChat DevTools")
+                let finderName = fileManager.displayName(atPath: bundleURL.path)
+                insert((finderName as NSString).deletingPathExtension, into: &identifiers)
+
+                // 2. On-disk bundle name (e.g. "wechatwebdevtools")
+                insert(bundleURL.deletingPathExtension().lastPathComponent, into: &identifiers)
+
+                // 3. Info.plist
+                let infoPlistURL = bundleURL.appendingPathComponent("Contents/Info.plist")
+                if let data = try? Data(contentsOf: infoPlistURL),
+                   let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
+                    if let bundleID = plist["CFBundleIdentifier"] as? String {
+                        insert(bundleID, into: &identifiers)
+                        insert((bundleID as NSString).pathExtension, into: &identifiers)
+                    }
+                    insert(plist["CFBundleName"] as? String, into: &identifiers)
+                    insert(plist["CFBundleDisplayName"] as? String, into: &identifiers)
+                }
+
+                // 4. Localized names (e.g. zh_CN.lproj, zh-Hans.lproj)
+                let resourcesURL = bundleURL.appendingPathComponent("Contents/Resources")
+                guard let resources = try? fileManager.contentsOfDirectory(atPath: resourcesURL.path) else { continue }
+                for resource in resources where resource.hasSuffix(".lproj") {
+                    let stringsURL = resourcesURL
+                        .appendingPathComponent(resource)
+                        .appendingPathComponent("InfoPlist.strings")
+                    guard let data = try? Data(contentsOf: stringsURL),
+                          let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: String] else {
+                        continue
+                    }
+                    insert(plist["CFBundleDisplayName"], into: &identifiers)
+                    insert(plist["CFBundleName"], into: &identifiers)
+                }
+            }
+        }
+
+        return identifiers
+    }
+
+    private static func insert(_ value: String?, into identifiers: inout Set<String>) {
+        guard let value, !value.isEmpty else { return }
+        let lowered = value.lowercased()
+        identifiers.insert(lowered)
+        identifiers.insert(normalizeAppIdentifier(lowered))
+    }
+
+    // Collect every .app under a root, descending through plain folders but never into a
+    // bundle's own contents (an .app or .framework holds hundreds of irrelevant files).
+    private static func appBundles(in root: String) -> [URL] {
+        let fileManager = FileManager.default
+        var bundles: [URL] = []
+        var pending: [(path: String, depth: Int)] = [(root, 0)]
+
+        while let (path, depth) = pending.popLast() {
+            guard let entries = try? fileManager.contentsOfDirectory(atPath: path) else { continue }
+            for entry in entries where !entry.hasPrefix(".") {
+                let fullPath = (path as NSString).appendingPathComponent(entry)
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory),
+                      isDirectory.boolValue else {
+                    continue
+                }
+
+                if entry.hasSuffix(".app") {
+                    bundles.append(URL(fileURLWithPath: fullPath))
+                } else if depth < maxSearchDepth && (entry as NSString).pathExtension.isEmpty {
+                    pending.append((fullPath, depth + 1))
+                }
+            }
+        }
+
+        return bundles
+    }
+}
+
+// Everything macOS itself ships. Since Catalina the OS lives on a sealed, read-only
+// volume, so the names that belong to the system are a finite set that can be enumerated
+// exactly -- launchd's job registry plus the executables and bundles on that volume --
+// instead of approximated with a hand-written deny list. A folder under Application
+// Support whose name appears here was created by macOS, not by an app the user installed.
+private nonisolated final class SystemComponentIndex: @unchecked Sendable {
+    static let shared = SystemComponentIndex()
+
+    // Daemons routinely name their folder after the framework hosting them plus a suffix
+    // (CallHistory.framework -> CallHistoryTransactions), so prefixes have to match too.
+    // The bound stops short, generic system names from swallowing third-party folders.
+    private static let minimumPrefixLength = 8
+
+    // launchd's job definitions are the authoritative registry of every service macOS runs.
+    private static let launchdDirectories = [
+        "/System/Library/LaunchDaemons",
+        "/System/Library/LaunchAgents",
+        "/Library/Apple/System/Library/LaunchDaemons",
+        "/Library/Apple/System/Library/LaunchAgents"
+    ]
+
+    private static let executableDirectories = [
+        "/usr/libexec",
+        "/usr/sbin",
+        "/usr/bin",
+        "/System/Library/CoreServices"
+    ]
+
+    private static let frameworkDirectories = [
+        "/System/Library/PrivateFrameworks",
+        "/System/Library/Frameworks"
+    ]
+
+    // Where a framework keeps the daemons, XPC services and helper apps it owns.
+    private static let frameworkPayloadSubpaths = [
+        "Support", "Versions/A/Support",
+        "XPCServices", "Versions/A/XPCServices",
+        "Helpers", "Versions/A/Helpers",
+        "Resources", "Versions/A/Resources"
+    ]
+
+    private static let bundleDirectories = [
+        "/System/Library/Extensions",
+        "/System/Library/ExtensionKit/Extensions",
+        "/System/Library/Services",
+        "/System/Library/Spotlight",
+        "/System/Library/PreferencePanes",
+        "/System/Applications",
+        "/System/Library/CoreServices/Applications"
+    ]
+
+    private static let bundleExtensions: Set<String> = [
+        "app", "xpc", "appex", "bundle", "framework", "service", "prefpane", "mdimporter"
+    ]
+
+    private let lock = NSLock()
+    private var cachedNames: Set<String>?
+
+    func isSystemOwned(_ folder: String) -> Bool {
+        let index = systemNames()
+        let lower = folder.lowercased()
+        if index.contains(lower) || index.contains(normalizeAppIdentifier(folder)) {
+            return true
+        }
+
+        // Test the folder's own prefixes against the index rather than scanning thousands
+        // of entries. Deliberately uses the raw lowercased name: normalizing away the dot
+        // in "default.store" would let the unrelated "defaults" tool match it.
+        guard lower.count > Self.minimumPrefixLength else { return false }
+        let characters = Array(lower)
+        for length in Self.minimumPrefixLength..<characters.count
+        where index.contains(String(characters[0..<length])) {
+            return true
+        }
+        return false
+    }
+
+    // The system volume is sealed and read-only, so this is built once per launch.
+    private func systemNames() -> Set<String> {
+        lock.lock()
+        if let cachedNames {
+            lock.unlock()
+            return cachedNames
+        }
+        lock.unlock()
+
+        let built = Self.build()
+
+        lock.lock()
+        cachedNames = built
+        lock.unlock()
+
+        return built
+    }
+
+    private static func build() -> Set<String> {
+        var names = Set<String>()
+        let fileManager = FileManager.default
+
+        func add(_ value: String?) {
+            guard let value else { return }
+            let base = (value as NSString).lastPathComponent
+            guard !base.isEmpty else { return }
+            names.insert(base.lowercased())
+            names.insert(normalizeAppIdentifier(base))
+        }
+
+        for directory in launchdDirectories {
+            guard let files = try? fileManager.contentsOfDirectory(atPath: directory) else { continue }
+            for file in files where file.hasSuffix(".plist") {
+                let path = (directory as NSString).appendingPathComponent(file)
+                guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                      let job = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+                    continue
+                }
+                if let label = job["Label"] as? String {
+                    add(label)
+                    add(label.split(separator: ".").last.map(String.init))
+                }
+                add(job["Program"] as? String)
+                add((job["ProgramArguments"] as? [String])?.first)
+            }
+        }
+
+        for directory in executableDirectories {
+            var pending: [(path: String, depth: Int)] = [(directory, 0)]
+            while let (path, depth) = pending.popLast() {
+                guard let entries = try? fileManager.contentsOfDirectory(atPath: path) else { continue }
+                for entry in entries {
+                    if bundleExtensions.contains((entry as NSString).pathExtension.lowercased()) {
+                        add((entry as NSString).deletingPathExtension)
+                        continue
+                    }
+                    let fullPath = (path as NSString).appendingPathComponent(entry)
+                    var isDirectory: ObjCBool = false
+                    guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) else { continue }
+                    if isDirectory.boolValue {
+                        if depth < 2 { pending.append((fullPath, depth + 1)) }
+                    } else {
+                        add(entry)
+                    }
+                }
+            }
+        }
+
+        for base in frameworkDirectories {
+            guard let frameworks = try? fileManager.contentsOfDirectory(atPath: base) else { continue }
+            for framework in frameworks where framework.hasSuffix(".framework") {
+                add((framework as NSString).deletingPathExtension)
+                let frameworkPath = (base as NSString).appendingPathComponent(framework)
+                for subpath in frameworkPayloadSubpaths {
+                    let payloadPath = (frameworkPath as NSString).appendingPathComponent(subpath)
+                    guard let entries = try? fileManager.contentsOfDirectory(atPath: payloadPath) else { continue }
+                    for entry in entries {
+                        let fileExtension = (entry as NSString).pathExtension.lowercased()
+                        if bundleExtensions.contains(fileExtension) {
+                            add((entry as NSString).deletingPathExtension)
+                            continue
+                        }
+                        // Resources also holds ordinary assets; only an extensionless
+                        // executable is a daemon whose generic name belongs in the index.
+                        guard fileExtension.isEmpty else { continue }
+                        let entryPath = (payloadPath as NSString).appendingPathComponent(entry)
+                        var isDirectory: ObjCBool = false
+                        guard fileManager.fileExists(atPath: entryPath, isDirectory: &isDirectory),
+                              !isDirectory.boolValue,
+                              fileManager.isExecutableFile(atPath: entryPath) else {
+                            continue
+                        }
+                        add(entry)
+                    }
+                }
+            }
+        }
+
+        for base in bundleDirectories {
+            guard let entries = try? fileManager.contentsOfDirectory(atPath: base) else { continue }
+            for entry in entries {
+                add((entry as NSString).deletingPathExtension)
+            }
+        }
+
+        return names
+    }
+}
+
+// Every command-line tool and package the user has installed. Application Support folders
+// are created by CLI tools, SDKs and language runtimes at least as often as by .app
+// bundles, and none of those are discoverable by looking at /Applications.
+private nonisolated final class InstalledToolIndex: @unchecked Sendable {
+    static let shared = InstalledToolIndex()
+
+    private static let cacheLifetime: TimeInterval = 15
+
+    // Package managers and language runtimes that install into a fixed location.
+    private static let fixedDirectories = [
+        "/opt/homebrew/bin", "/opt/homebrew/sbin",
+        "/usr/local/bin", "/usr/local/sbin",
+        "/opt/local/bin", "/opt/local/sbin",           // MacPorts
+        "/sw/bin", "/sw/sbin",                         // Fink
+        "/nix/var/nix/profiles/default/bin",
+        "~/.nix-profile/bin",
+        "~/bin", "~/.local/bin",
+        "~/.cargo/bin",                                // Rust
+        "~/go/bin",                                    // Go
+        "~/.bun/bin", "~/.deno/bin",
+        "~/.volta/bin",
+        "~/.yarn/bin", "~/.config/yarn/global/node_modules/.bin",
+        "~/.npm-global/bin", "~/.npm-packages/bin",
+        "~/.pyenv/shims", "~/.pyenv/bin",
+        "~/.rbenv/shims", "~/.nodenv/shims",
+        "~/.asdf/shims", "~/.asdf/bin",
+        "~/.fnm/aliases/default/bin",
+        "~/.dotnet/tools",
+        "~/.krew/bin",                                 // kubectl plugins
+        "~/.rye/shims", "~/.pixi/bin", "~/.poetry/bin",
+        "~/.composer/vendor/bin", "~/.config/composer/vendor/bin",
+        "~/anaconda3/bin", "~/miniconda3/bin", "~/miniforge3/bin", "~/mambaforge/bin",
+        "/opt/anaconda3/bin", "/opt/miniconda3/bin",
+        "/opt/homebrew/Caskroom/miniconda/base/bin",
+        "/Library/Apple/usr/bin",
+        "~/Library/pnpm",
+        "~/flutter/bin",
+        "~/Library/Android/sdk/platform-tools",
+        "~/Library/Android/sdk/cmdline-tools/latest/bin",
+        "~/Library/Android/sdk/emulator"
+    ]
+
+    // Version managers keep one toolchain per directory, so their bin folders can only be
+    // found by enumerating which versions are actually installed.
+    private static let versionedRoots: [(root: String, suffix: String)] = [
+        ("~/.nvm/versions/node", "bin"),
+        ("~/.fnm/node-versions", "installation/bin"),
+        ("~/Library/Application Support/fnm/node-versions", "installation/bin"),
+        ("~/.volta/tools/image/node", "bin"),
+        ("~/.sdkman/candidates", "current/bin"),
+        ("~/Library/Python", "bin"),
+        ("~/.gem/ruby", "bin"),
+        ("~/.rbenv/versions", "bin"),
+        ("~/.pyenv/versions", "bin"),
+        ("~/.nodenv/versions", "bin"),
+        ("/opt/homebrew/opt", "bin"),                  // keg-only formulae
+        ("/usr/local/opt", "bin")
+    ]
+
+    // Package names, which routinely differ from the command they install.
+    private static let packageRoots = [
+        "/opt/homebrew/Cellar", "/usr/local/Cellar",
+        "/opt/homebrew/Caskroom", "/usr/local/Caskroom",
+        "/opt/homebrew/lib/node_modules", "/usr/local/lib/node_modules",
+        "~/.npm-global/lib/node_modules",
+        "~/.bun/install/global/node_modules",
+        "~/.config/yarn/global/node_modules",
+        "~/.local/share/pnpm/global/5/node_modules",
+        "~/.local/pipx/venvs"
+    ]
+
+    private let lock = NSLock()
+    private var cachedNames: Set<String>?
+    private var cachedAt = Date.distantPast
+
+    func isInstalledTool(_ name: String) -> Bool {
+        let index = toolNames()
+        if index.contains(name.lowercased()) || index.contains(normalizeAppIdentifier(name)) {
+            return true
+        }
+
+        // Reverse-domain folders are named for the vendor, not the command: the folder
+        // "com.openai.codex" is written by a CLI simply called "codex".
+        guard let lastComponent = name.split(separator: ".").last, lastComponent.count >= 3 else {
+            return false
+        }
+        let command = String(lastComponent)
+        return index.contains(command.lowercased()) || index.contains(normalizeAppIdentifier(command))
+    }
+
+    private func toolNames() -> Set<String> {
+        lock.lock()
+        if let cachedNames, Date().timeIntervalSince(cachedAt) < Self.cacheLifetime {
+            lock.unlock()
+            return cachedNames
+        }
+        lock.unlock()
+
+        let built = Self.build()
+
+        lock.lock()
+        cachedNames = built
+        cachedAt = Date()
+        lock.unlock()
+
+        return built
+    }
+
+    private static func build() -> Set<String> {
+        var names = Set<String>()
+        let fileManager = FileManager.default
+
+        func add(_ value: String) {
+            guard !value.isEmpty, !value.hasPrefix(".") else { return }
+            names.insert(value.lowercased())
+            names.insert(normalizeAppIdentifier(value))
+        }
+
+        for directory in searchDirectories() {
+            guard let entries = try? fileManager.contentsOfDirectory(atPath: directory) else { continue }
+            for entry in entries {
+                add(entry)
+            }
+        }
+
+        for root in packageRoots {
+            let expanded = NSString(string: root).expandingTildeInPath
+            guard let entries = try? fileManager.contentsOfDirectory(atPath: expanded) else { continue }
+            for entry in entries {
+                // npm scopes hold the real package names one level down.
+                guard entry.hasPrefix("@") else {
+                    add(entry)
+                    continue
+                }
+                let scopePath = (expanded as NSString).appendingPathComponent(entry)
+                for scoped in (try? fileManager.contentsOfDirectory(atPath: scopePath)) ?? [] {
+                    add(scoped)
+                }
+            }
+        }
+
+        return names
+    }
+
+    private static func searchDirectories() -> [String] {
+        // The only complete source. Tools get installed wherever their owner decided
+        // (/pkg/env/global/bin, ~/flutter/bin, inside an app bundle), so no fixed list can
+        // be exhaustive, and a GUI process inherits a minimal PATH that never reflects the
+        // user's shell configuration. The lists below are the fallback for when the shell
+        // cannot be consulted.
+        var directories = loginShellPath()
+
+        // path_helper assembles the system PATH from these files. Unlike the process
+        // environment they are readable here, and third-party installers register their
+        // own directories in paths.d.
+        directories += pathEntries(inFile: "/etc/paths")
+        let pathsDirectory = "/etc/paths.d"
+        for file in (try? FileManager.default.contentsOfDirectory(atPath: pathsDirectory)) ?? [] {
+            directories += pathEntries(inFile: (pathsDirectory as NSString).appendingPathComponent(file))
+        }
+        if let environmentPath = ProcessInfo.processInfo.environment["PATH"] {
+            directories += environmentPath.split(separator: ":").map(String.init)
+        }
+
+        directories += fixedDirectories.map { NSString(string: $0).expandingTildeInPath }
+
+        for (root, suffix) in versionedRoots {
+            let expandedRoot = NSString(string: root).expandingTildeInPath
+            guard let versions = try? FileManager.default.contentsOfDirectory(atPath: expandedRoot) else { continue }
+            for version in versions where !version.hasPrefix(".") {
+                directories.append(
+                    (expandedRoot as NSString)
+                        .appendingPathComponent(version)
+                        .appending("/\(suffix)")
+                )
+            }
+        }
+
+        return Array(Set(directories))
+    }
+
+    private static func pathEntries(inFile path: String) -> [String] {
+        guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
+        return contents
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    // Run the user's shell as a login + interactive shell so it sources the same profile
+    // files a terminal would, then ask it for the resulting PATH.
+    private static func loginShellPath() -> [String] {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        guard FileManager.default.isExecutableFile(atPath: shell) else { return [] }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-lic", "echo $PATH"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            return []
+        }
+
+        // A profile that prompts for input or hangs must not stall the scan.
+        var output = Data()
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            output = pipe.fileHandleForReading.readDataToEndOfFile()
+            finished.signal()
+        }
+        guard finished.wait(timeout: .now() + 5) == .success else {
+            process.terminate()
+            return []
+        }
+        process.waitUntilExit()
+
+        return String(decoding: output, as: UTF8.self)
+            .split(whereSeparator: \.isNewline)
+            .last
+            .map { $0.split(separator: ":").map(String.init) } ?? []
+    }
+}
 
 nonisolated struct CategoryScanResult: Sendable {
     let categories: [CategoryItem]
+    let containerAccessDenied: Bool
+}
+
+nonisolated struct DetailScanResult: Sendable {
+    let items: [CategoryItem]
     let containerAccessDenied: Bool
 }
 
@@ -12,7 +622,7 @@ nonisolated struct FileSystemScanner: Sendable {
         var containerAccessDenied = false
         let fileManager = FileManager.default
 
-        for rule in CleanConfig.defaultRules where mode.includes(rule.minimumScanMode) {
+        for rule in CleanConfig.defaultRules where rule.scanMode == mode {
             let expandedPath = NSString(string: rule.pathDescription).expandingTildeInPath
             var isDirectory: ObjCBool = false
 
@@ -27,11 +637,7 @@ nonisolated struct FileSystemScanner: Sendable {
                 foundCategories.append(contentsOf: result.items)
                 containerAccessDenied = result.accessDenied
             } else if rule.isDynamicHomeCleanupRule {
-                var allChildren: [CategoryItem] = []
-                allChildren.append(contentsOf: scanHomeCaches(basePath: rule.pathDescription))
-                if mode == .deepAnalysis {
-                    allChildren.append(contentsOf: scanHomeLeftovers(basePath: rule.pathDescription))
-                }
+                let allChildren = scanHomeCaches(basePath: rule.pathDescription)
 
                 if !allChildren.isEmpty {
                     let totalBytes = allChildren.reduce(0) { $0 + $1.sizeBytes }
@@ -45,9 +651,7 @@ nonisolated struct FileSystemScanner: Sendable {
                         rule: rule,
                         children: allChildren
                     )
-                    parent.displayPath = mode == .deepAnalysis
-                        ? "~ (Caches & Leftovers)"
-                        : "~ (Caches)"
+                    parent.displayPath = "~ (Caches)"
                     foundCategories.append(parent)
                 }
             } else if fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) {
@@ -65,21 +669,49 @@ nonisolated struct FileSystemScanner: Sendable {
             }
         }
 
+        let categories = mode == .deepAnalysis
+            ? foundCategories.map(makeReadOnly)
+            : foundCategories
         return CategoryScanResult(
-            categories: foundCategories,
+            categories: categories,
             containerAccessDenied: containerAccessDenied
         )
     }
 
+    private func makeReadOnly(_ item: CategoryItem) -> CategoryItem {
+        var readOnlyRule = item.rule
+        readOnlyRule.cleanType = .none
+        return CategoryItem(
+            name: item.name,
+            pathDescription: item.pathDescription,
+            iconName: item.iconName,
+            iconColor: item.iconColor,
+            sizeBytes: item.sizeBytes,
+            sizeString: item.sizeString,
+            rule: readOnlyRule,
+            children: item.children?.map(makeReadOnly),
+            isSelected: false,
+            isDisplayOnly: true,
+            finderPath: item.finderPath ?? item.pathDescription,
+            displayPath: item.displayPath,
+            description: item.description
+        )
+    }
+
     // Build read-only informational sections synchronously on a background queue.
-    func scanDetails() -> [CategoryItem] {
+    func scanDetails() -> DetailScanResult {
         let toolsItem = scanInstalledTools()
         let homeItem = scanHomeDirectory()
         let appDataItem = scanInstalledAppData(basePath: "~/Library/Application Support")
-        return ([toolsItem] + [homeItem, appDataItem].compactMap { $0 }).filter {
+        let containerResult = scanInstalledAppContainers()
+        let items = ([toolsItem] + [homeItem, appDataItem, containerResult.item].compactMap { $0 }).filter {
             guard let children = $0.children else { return false }
             return !children.isEmpty
         }
+        return DetailScanResult(
+            items: items,
+            containerAccessDenied: containerResult.accessDenied
+        )
     }
 
     // Dynamically scan simulator devices by OS version
@@ -263,40 +895,15 @@ nonisolated struct FileSystemScanner: Sendable {
         return [parent]
     }
 
-    // Fetch all currently installed application names and bundle identifiers across system application directories
     private func normalizeString(_ str: String) -> String {
-        return str.lowercased()
-            .replacingOccurrences(of: "-", with: "")
-            .replacingOccurrences(of: "_", with: "")
-            .replacingOccurrences(of: " ", with: "")
-            .replacingOccurrences(of: ".", with: "")
-    }
-
-    private func isBinaryInPATH(_ name: String) -> Bool {
-        let cleanName = name.lowercased()
-        let pathDirs = [
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-            (NSHomeDirectory() as NSString).appendingPathComponent(".cargo/bin"),
-            (NSHomeDirectory() as NSString).appendingPathComponent("go/bin")
-        ]
-        let fileManager = FileManager.default
-        for dir in pathDirs {
-            let fullPath = (dir as NSString).appendingPathComponent(cleanName)
-            if fileManager.fileExists(atPath: fullPath) {
-                return true
-            }
-        }
-        return false
+        normalizeAppIdentifier(str)
     }
 
     // True if a folder name (under ~/Library/Application Support or ~) corresponds to a
     // currently installed application. Shared by the leftovers and installed-app-data scans
     // so "installed" vs "leftover" can never drift apart.
     private func folderMatchesInstalledApp(_ folder: String, lowerFolder: String, normalizedFolder: String, installedApps: Set<String>) -> Bool {
-        installedApps.contains { appKey in
+        let matchesByName = installedApps.contains { appKey in
             guard !appKey.isEmpty else { return false }
             let normalizedAppKey = normalizeString(appKey)
             if lowerFolder == appKey || normalizedFolder == normalizedAppKey {
@@ -309,93 +916,32 @@ nonisolated struct FileSystemScanner: Sendable {
             }
             return false
         }
-    }
-
-    // Fetch all currently installed application names and bundle identifiers across system application directories
-    private func fetchInstalledAppIdentifiers() -> Set<String> {
-        var identifiers = Set<String>()
-        let appDirs = [
-            "/Applications",
-            "/System/Applications",
-            (NSHomeDirectory() as NSString).appendingPathComponent("Applications")
-        ]
-
-        let fileManager = FileManager.default
-
-        for dir in appDirs {
-            guard let items = try? fileManager.contentsOfDirectory(atPath: dir) else { continue }
-            for item in items {
-                if item.hasSuffix(".app") {
-                    let appBundleURL = URL(fileURLWithPath: dir).appendingPathComponent(item)
-
-                    // 1. Finder Display Name (e.g., "WeChat DevTools")
-                    let finderDisplayName = fileManager.displayName(atPath: appBundleURL.path)
-                    let cleanFinderName = (finderDisplayName as NSString).deletingPathExtension.lowercased()
-                    identifiers.insert(cleanFinderName)
-                    identifiers.insert(normalizeString(cleanFinderName))
-
-                    // 2. Disk App Name (e.g., "wechatwebdevtools")
-                    let appName = (item as NSString).deletingPathExtension.lowercased()
-                    identifiers.insert(appName)
-                    identifiers.insert(normalizeString(appName))
-
-                    // 3. Info.plist
-                    let infoPlistURL = appBundleURL.appendingPathComponent("Contents/Info.plist")
-                    if let data = try? Data(contentsOf: infoPlistURL),
-                       let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
-                        if let bundleID = plist["CFBundleIdentifier"] as? String {
-                            let bLower = bundleID.lowercased()
-                            identifiers.insert(bLower)
-                            identifiers.insert(normalizeString(bLower))
-                            let bundleLast = (bundleID as NSString).pathExtension.lowercased()
-                            if !bundleLast.isEmpty {
-                                identifiers.insert(bundleLast)
-                                identifiers.insert(normalizeString(bundleLast))
-                            }
-                        }
-                        if let bundleName = plist["CFBundleName"] as? String {
-                            let bName = bundleName.lowercased()
-                            identifiers.insert(bName)
-                            identifiers.insert(normalizeString(bName))
-                        }
-                        if let displayName = plist["CFBundleDisplayName"] as? String {
-                            let dName = displayName.lowercased()
-                            identifiers.insert(dName)
-                            identifiers.insert(normalizeString(dName))
-                        }
-                    }
-
-                    // 4. Scan all localized InfoPlist.strings (e.g., zh_CN.lproj, zh-Hans.lproj)
-                    let resourcesURL = appBundleURL.appendingPathComponent("Contents/Resources")
-                    if let resContents = try? fileManager.contentsOfDirectory(atPath: resourcesURL.path) {
-                        for resItem in resContents {
-                            if resItem.hasSuffix(".lproj") {
-                                let stringsURL = resourcesURL.appendingPathComponent(resItem).appendingPathComponent("InfoPlist.strings")
-                                if let data = try? Data(contentsOf: stringsURL),
-                                   let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: String] {
-                                    if let dispName = plist["CFBundleDisplayName"] {
-                                        let lower = dispName.lowercased()
-                                        identifiers.insert(lower)
-                                        identifiers.insert(normalizeString(lower))
-                                    }
-                                    if let bName = plist["CFBundleName"] {
-                                        let lower = bName.lowercased()
-                                        identifiers.insert(lower)
-                                        identifiers.insert(normalizeString(lower))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        if matchesByName {
+            return true
         }
 
-        return identifiers
+        // Folders are frequently named after the owning bundle id, which LaunchServices can
+        // resolve even when the app itself sits somewhere the bundle walk never reaches.
+        return InstalledAppIndex.shared.isRegisteredBundleIdentifier(folder)
     }
 
-    // macOS system / essential folders under ~/Library/Application Support that should never
-    // be listed as app data (neither leftover nor installed-app data). Shared by both scans.
+    // All currently installed application names and bundle identifiers, from every
+    // application directory on the system.
+    private func fetchInstalledAppIdentifiers() -> Set<String> {
+        InstalledAppIndex.shared.installedIdentifiers()
+    }
+
+    // A folder under ~/Library/Application Support that macOS owns: neither a leftover nor
+    // installed-app data. Shared by both scans so their verdicts can never drift apart.
+    private func isSystemOwnedAppSupportFolder(_ folder: String, lowerFolder: String) -> Bool {
+        let isKnownSystemFolder = Self.appSupportSystemIgnoreList.contains { sysKey in
+            lowerFolder == sysKey || lowerFolder.hasPrefix(sysKey)
+        }
+        return isKnownSystemFolder || SystemComponentIndex.shared.isSystemOwned(folder)
+    }
+
+    // Shared user-data folders that belong to macOS but are named after a user-facing
+    // feature rather than the daemon behind them, so the system volume cannot name them.
     private static let appSupportSystemIgnoreList: Set<String> = [
         "addressbook", "clouddocs", "mobilesync", "dock", "safari", "apple", "com.apple.",
         "accounts", "crashreporter", "defaultappprovider", "knowledge", "quick look",
@@ -556,6 +1102,78 @@ nonisolated struct FileSystemScanner: Sendable {
         "yarn.lock": ("lock.fill", .blue)
     ]
 
+    // What a leftover folder actually holds. Whether an app was ever installed is not
+    // decidable, but what its folder contains is, and that is what lets the user judge:
+    // a crash log directory and a folder holding a private key warrant different answers.
+    // Read from the folder's own structure rather than a name list, which cannot keep up
+    // with software that did not exist when the list was written.
+    private func describeLeftoverContents(at path: String) -> LocalizedStringKey? {
+        let fileManager = FileManager.default
+        guard let entries = try? fileManager.contentsOfDirectory(atPath: path) else { return nil }
+        let visible = entries.filter { !$0.hasPrefix(".") }
+        if visible.isEmpty { return "Empty" }
+
+        // The folder's own name is evidence too: "com.tencent.bugly" says what it holds
+        // even though its contents are opaque. One level down as well, because the telling
+        // file is usually inside a subfolder, as in "cloud-code/intellij/credentials.json".
+        var signature = Set(visible.map { $0.lowercased() })
+        signature.insert((path as NSString).lastPathComponent.lowercased())
+        for entry in visible {
+            let child = (path as NSString).appendingPathComponent(entry)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: child, isDirectory: &isDirectory),
+                  isDirectory.boolValue,
+                  let children = try? fileManager.contentsOfDirectory(atPath: child) else {
+                continue
+            }
+            for name in children.prefix(24) where !name.hasPrefix(".") {
+                signature.insert(name.lowercased())
+            }
+        }
+
+        func contains(_ needles: [String]) -> Bool {
+            signature.contains { entry in needles.contains { entry.contains($0) } }
+        }
+
+        // Reasons to keep a folder are checked before reasons to delete it, so that a
+        // directory holding both a crash log and a saved session reads as user data.
+        if contains(["credential", "license", "licence", "certificate-authority", "keychain",
+                     "secret", ".pem", ".key", "token"]) {
+            return "Keys & Licenses"
+        }
+        // "library" is deliberately absent: every sandbox container has a Data/Library,
+        // so it would label nearly all of them as user data.
+        if contains(["documents", "desktop", "session", "workspace", "conversation",
+                     "myplaces", "inventory", "profiles", "packages", "team data"]) {
+            return "User Data"
+        }
+        // Registered by some other app to talk to a browser, so removing it breaks that
+        // app rather than the browser the folder is named after.
+        if signature.contains("nativemessaginghosts") {
+            return "Browser Bridge"
+        }
+        if contains(["appcenter", "bugsnag", "bugly", "sentry", "crashreport", "crashes",
+                     "kscrash", "crashpad"]) {
+            return "Crash Reports"
+        }
+        if contains(["telemetry", "analytics", "segment-events", "countly", "deviceid"]) {
+            return "Telemetry"
+        }
+        if contains(["update", "installer"]) {
+            return "Updater"
+        }
+        if contains(["log", "diagnostic"]) {
+            return "Logs"
+        }
+        if contains(["cache", "temp", "daemon"]) {
+            return "Cache"
+        }
+        if contains([".plist", ".ini", ".json", "config", "settings", "preference"]) {
+            return "Settings"
+        }
+        return "App Data"
+    }
+
     // Dynamically scan for folders in Application Support that belong to UNINSTALLED applications
     private func scanAppLeftovers(basePath: String) -> [CategoryItem] {
         let expandedBasePath = NSString(string: basePath).expandingTildeInPath
@@ -577,16 +1195,13 @@ nonisolated struct FileSystemScanner: Sendable {
             let lowerFolder = folder.lowercased()
             let normalizedFolder = normalizeString(folder)
 
-            // 1. Check if folder is a macOS system folder
-            let isSystemFolder = Self.appSupportSystemIgnoreList.contains { sysKey in
-                lowerFolder == sysKey || lowerFolder.hasPrefix(sysKey)
-            }
-            if isSystemFolder {
+            // 1. Check if folder belongs to macOS itself
+            if isSystemOwnedAppSupportFolder(folder, lowerFolder: lowerFolder) {
                 continue
             }
 
-            // 2. Check if folder corresponds to a CLI binary tool in PATH
-            if isBinaryInPATH(folder) || isBinaryInPATH(lowerFolder) || isBinaryInPATH(normalizedFolder) {
+            // 2. Check if folder belongs to an installed command-line tool or package
+            if InstalledToolIndex.shared.isInstalledTool(folder) {
                 continue
             }
 
@@ -603,29 +1218,27 @@ nonisolated struct FileSystemScanner: Sendable {
 
             if fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) && isDirectory.boolValue {
                 let sizeBytes = calculateDirectorySize(at: fullPath, isDirectory: true)
-                // Only list leftover folders taking space (> 500 KB)
-                if sizeBytes > 500_000 {
-                    totalBytes += sizeBytes
-                    let displayPath = "\(basePath)/\(folder)"
-                    let childRule = CleanRule(
-                        name: folder,
-                        pathDescription: displayPath,
-                        iconName: "folder.badge.minus",
-                        iconColor: .pink,
-                        cleanType: .deleteDirectoryTree
-                    )
+                totalBytes += sizeBytes
+                let displayPath = "\(basePath)/\(folder)"
+                let childRule = CleanRule(
+                    name: folder,
+                    pathDescription: displayPath,
+                    iconName: "folder.badge.minus",
+                    iconColor: .pink,
+                    cleanType: .deleteDirectoryTree,
+                    note: describeLeftoverContents(at: fullPath)
+                )
 
-                    let childItem = CategoryItem(
-                        name: childRule.name,
-                        pathDescription: childRule.pathDescription,
-                        iconName: childRule.iconName,
-                        iconColor: childRule.iconColor,
-                        sizeBytes: sizeBytes,
-                        sizeString: formatBytes(sizeBytes),
-                        rule: childRule
-                    )
-                    childItems.append(childItem)
-                }
+                let childItem = CategoryItem(
+                    name: childRule.name,
+                    pathDescription: childRule.pathDescription,
+                    iconName: childRule.iconName,
+                    iconColor: childRule.iconColor,
+                    sizeBytes: sizeBytes,
+                    sizeString: formatBytes(sizeBytes),
+                    rule: childRule
+                )
+                childItems.append(childItem)
             }
         }
 
@@ -722,29 +1335,29 @@ nonisolated struct FileSystemScanner: Sendable {
             }
 
             let sizeBytes = calculateDirectorySize(at: fullPath, isDirectory: true)
-            // Only list leftover containers taking space (> 500 KB), matching app leftovers.
-            if sizeBytes > 500_000 {
-                totalBytes += sizeBytes
-                let displayPath = "\(basePath)/\(entry)"
-                let childRule = CleanRule(
-                    name: entry,
-                    pathDescription: displayPath,
-                    iconName: "shippingbox.fill",
-                    iconColor: .pink,
-                    cleanType: .deleteDirectoryTree
-                )
+            totalBytes += sizeBytes
+            let displayPath = "\(basePath)/\(entry)"
+            // A container's contents live under Data/, which is the app's redirected home.
+            let dataPath = (fullPath as NSString).appendingPathComponent("Data")
+            let childRule = CleanRule(
+                name: entry,
+                pathDescription: displayPath,
+                iconName: "shippingbox.fill",
+                iconColor: .pink,
+                cleanType: .deleteDirectoryTree,
+                note: describeLeftoverContents(at: dataPath) ?? describeLeftoverContents(at: fullPath)
+            )
 
-                let childItem = CategoryItem(
-                    name: childRule.name,
-                    pathDescription: childRule.pathDescription,
-                    iconName: childRule.iconName,
-                    iconColor: childRule.iconColor,
-                    sizeBytes: sizeBytes,
-                    sizeString: formatBytes(sizeBytes),
-                    rule: childRule
-                )
-                childItems.append(childItem)
-            }
+            let childItem = CategoryItem(
+                name: childRule.name,
+                pathDescription: childRule.pathDescription,
+                iconName: childRule.iconName,
+                iconColor: childRule.iconColor,
+                sizeBytes: sizeBytes,
+                sizeString: formatBytes(sizeBytes),
+                rule: childRule
+            )
+            childItems.append(childItem)
         }
 
         guard !childItems.isEmpty else { return ([], false) }
@@ -773,6 +1386,141 @@ nonisolated struct FileSystemScanner: Sendable {
         )
 
         return ([parentItem], false)
+    }
+
+    // Read-only analysis of containers owned by apps that are still installed.
+    // Access to another app's sandbox can require Full Disk Access even though
+    // this scan never modifies the container.
+    private func scanInstalledAppContainers() -> (item: CategoryItem?, accessDenied: Bool) {
+        let basePaths = [
+            "~/Library/Containers",
+            "~/Library/Group Containers"
+        ]
+        let fileManager = FileManager.default
+        let installedApps = fetchInstalledAppIdentifiers()
+        var childItems: [CategoryItem] = []
+        var accessDenied = false
+
+        for basePath in basePaths {
+            let expandedBasePath = NSString(string: basePath).expandingTildeInPath
+            let entries: [String]
+            do {
+                entries = try fileManager.contentsOfDirectory(atPath: expandedBasePath)
+            } catch {
+                accessDenied = accessDenied || isPermissionDenied(error)
+                continue
+            }
+
+            for entry in entries {
+                let fullPath = (expandedBasePath as NSString).appendingPathComponent(entry)
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory),
+                      isDirectory.boolValue else { continue }
+
+                let metadataPath = (fullPath as NSString)
+                    .appendingPathComponent(".com.apple.containermanagerd.metadata.plist")
+                var bundleID = entry
+                do {
+                    let data = try Data(contentsOf: URL(fileURLWithPath: metadataPath))
+                    if let plist = try? PropertyListSerialization.propertyList(
+                        from: data,
+                        options: [],
+                        format: nil
+                    ) as? [String: Any],
+                       let identifier = plist["MCMMetadataIdentifier"] as? String,
+                       !identifier.isEmpty {
+                        bundleID = identifier
+                    }
+                } catch {
+                    accessDenied = accessDenied || isPermissionDenied(error)
+                }
+
+                let lowerBundle = bundleID.lowercased()
+                if lowerBundle.hasPrefix("com.apple.") { continue }
+
+                let normalizedBundle = normalizeString(bundleID)
+                guard folderMatchesInstalledApp(
+                    bundleID,
+                    lowerFolder: lowerBundle,
+                    normalizedFolder: normalizedBundle,
+                    installedApps: installedApps
+                ) else { continue }
+
+                let sizeResult = calculateDirectorySizeReportingAccess(at: fullPath)
+                accessDenied = accessDenied || sizeResult.accessDenied
+                guard sizeResult.bytes > 1_000_000 else { continue }
+
+                childItems.append(displayItem(
+                    name: bundleID,
+                    label: "\(basePath)/\(entry)",
+                    icon: "shippingbox.fill",
+                    color: .blue,
+                    sizeBytes: sizeResult.bytes,
+                    finderPath: fullPath,
+                    description: "App Container"
+                ))
+            }
+        }
+
+        guard !childItems.isEmpty else { return (nil, accessDenied) }
+        childItems.sort { $0.sizeBytes > $1.sizeBytes }
+        return (
+            displayParent(
+                name: "Installed App Containers",
+                label: "Installed App Containers",
+                icon: "shippingbox.fill",
+                color: .blue,
+                note: "Read Only",
+                children: childItems,
+                finderPath: NSString(string: "~/Library/Containers").expandingTildeInPath
+            ),
+            accessDenied
+        )
+    }
+
+    private func calculateDirectorySizeReportingAccess(
+        at path: String
+    ) -> (bytes: Int64, accessDenied: Bool) {
+        var accessDenied = false
+        let url = URL(fileURLWithPath: path)
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
+            errorHandler: { _, error in
+                accessDenied = accessDenied || isPermissionDenied(error)
+                return true
+            }
+        ) else {
+            return (0, true)
+        }
+
+        var totalBytes: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            if let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]),
+               values.isDirectory == false,
+               let size = values.fileSize {
+                totalBytes += Int64(size)
+            }
+        }
+        return (totalBytes, accessDenied)
+    }
+
+    private func isPermissionDenied(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain,
+           nsError.code == NSFileReadNoPermissionError
+            || nsError.code == NSFileWriteNoPermissionError {
+            return true
+        }
+        if nsError.domain == NSPOSIXErrorDomain,
+           nsError.code == POSIXErrorCode.EPERM.rawValue
+            || nsError.code == POSIXErrorCode.EACCES.rawValue {
+            return true
+        }
+        if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return isPermissionDenied(underlyingError)
+        }
+        return false
     }
 
     // Scan known tool cache locations under the home directory
@@ -832,84 +1580,6 @@ nonisolated struct FileSystemScanner: Sendable {
             childItems.append(item)
         }
 
-        return childItems
-    }
-
-    // Scan the home directory for dotfolders left behind by uninstalled apps/tools
-    private func scanHomeLeftovers(basePath: String) -> [CategoryItem] {
-        let home = NSHomeDirectory()
-        let fileManager = FileManager.default
-        guard let entries = try? fileManager.contentsOfDirectory(atPath: home) else { return [] }
-
-        let installedApps = fetchInstalledAppIdentifiers()
-
-        // Standard macOS user folders (non-dot, but skip defensively)
-        let standardUserFolders: Set<String> = [
-            "desktop", "documents", "downloads", "library", "movies", "music",
-            "pictures", "public", "applications", "sites"
-        ]
-
-        // Shared / system / tool dirs handled elsewhere - never delete wholesale
-        let sharedAndSystem: Set<String> = [
-            ".config", ".cache", ".local", ".ssh", ".gnupg", ".aws", ".kube",
-            ".docker", ".android", ".gradle", ".m2", ".ivy2", ".cargo", ".rustup",
-            ".npm", ".pnpm-store", ".yarn", ".gem", ".cocoapods",
-            ".bun", ".deno", ".node-gyp", ".nvm", ".fnm", ".volta",
-            ".asdf", ".pyenv", ".sdkman",
-            ".ds_store", ".localized", ".cfusertextencoding", ".fseventsd",
-            ".spotlight-v100", ".documentrevisions-v100", ".pkinstallsandboxmanager",
-            ".vol", ".file", ".hotfiles.btree", ".trash", ".temporaryitems"
-        ]
-
-        var childItems: [CategoryItem] = []
-        var totalBytes: Int64 = 0
-
-        for entry in entries {
-            // App/tool leftovers in ~ are dot-prefixed; skip regular user folders
-            guard entry.hasPrefix(".") else { continue }
-
-            let fullPath = (home as NSString).appendingPathComponent(entry)
-            var isDir: ObjCBool = false
-            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue else { continue }
-
-            let lower = entry.lowercased()
-            let normalized = normalizeString(entry)
-
-            if standardUserFolders.contains(lower) { continue }
-            if sharedAndSystem.contains(lower) { continue }
-            if isBinaryInPATH(entry) || isBinaryInPATH(lower) || isBinaryInPATH(normalized) { continue }
-
-            // Skip folders belonging to a currently installed application
-            let isInstalled = folderMatchesInstalledApp(entry, lowerFolder: lower, normalizedFolder: normalized, installedApps: installedApps)
-            if isInstalled { continue }
-
-            let bytes = calculateDirectorySize(at: fullPath, isDirectory: true)
-            guard bytes > 1_000_000 else { continue } // skip trivial folders
-
-            totalBytes += bytes
-            let displayPath = "~/\(entry)"
-            let note = Self.homeEntryDescriptions[lower] ?? Self.homeEntryDescriptions[normalized]
-            let rule = CleanRule(
-                name: entry,
-                pathDescription: displayPath,
-                iconName: Self.homeEntryIcons[lower]?.0 ?? Self.homeEntryIcons[normalized]?.0 ?? "folder.badge.minus",
-                iconColor: Self.homeEntryIcons[lower]?.1 ?? Self.homeEntryIcons[normalized]?.1 ?? .pink,
-                cleanType: .deleteDirectoryTree,
-                note: note.map { LocalizedStringKey($0) }
-            )
-            let item = CategoryItem(
-                name: entry,
-                pathDescription: displayPath,
-                iconName: rule.iconName,
-                iconColor: rule.iconColor,
-                sizeBytes: bytes,
-                sizeString: formatBytes(bytes),
-                rule: rule
-            )
-            childItems.append(item)
-        }
-
-        childItems.sort { $0.name.lowercased() < $1.name.lowercased() }
         return childItems
     }
 
@@ -1595,10 +2265,7 @@ nonisolated struct FileSystemScanner: Sendable {
             let normalizedFolder = normalizeString(folder)
 
             // Skip macOS system folders
-            let isSystemFolder = Self.appSupportSystemIgnoreList.contains { sysKey in
-                lowerFolder == sysKey || lowerFolder.hasPrefix(sysKey)
-            }
-            if isSystemFolder {
+            if isSystemOwnedAppSupportFolder(folder, lowerFolder: lowerFolder) {
                 continue
             }
 

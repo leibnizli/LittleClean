@@ -21,13 +21,14 @@ struct ContentView: View {
             ToolbarItem(placement: .principal) {
                 scanModePicker
             }
+            ToolbarItem(placement: .primaryAction) {
+                searchField
+            }
         }
         .onAppear {
             viewModel.performScan()
             viewModel.checkForUpdates()
         }
-        .searchable(text: $viewModel.searchText, prompt: "Search")
-        .disabled(viewModel.isScanning || viewModel.isLoadingDetails)
         .alert(
             "Deletion Failed",
             isPresented: Binding(
@@ -137,7 +138,10 @@ struct ContentView: View {
 
     @ViewBuilder
     private func itemContextMenu(_ item: CategoryItem) -> some View {
-        if !item.isDisplayOnly && !item.rule.isCheckboxHidden && item.sizeBytes > 0 {
+        if viewModel.scanMode == .safeCleanup,
+           !item.isDisplayOnly,
+           !item.rule.isCheckboxHidden,
+           item.sizeBytes > 0 {
             Button(LocalizedStringKey("Clean \"\(item.name)\"")) {
                 viewModel.cleanSingleItem(item)
             }
@@ -196,7 +200,7 @@ struct ContentView: View {
                 if viewModel.isLoadingDetails {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Scanning Home…")
+                    Text("Scanning…")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -226,8 +230,8 @@ struct ContentView: View {
         .disabled(viewModel.isScanning || viewModel.isLoadingDetails || viewModel.isCleaning)
         .help(
             viewModel.scanMode == .safeCleanup
-                ? "Lower-risk paths that can be cleaned."
-                : "All cleanup candidates plus read-only storage analysis."
+                ? Text("Lower-risk paths that can be cleaned.")
+                : Text("Read-only content outside Safe Cleanup.")
         )
         .alert(
             "About Deep Analysis",
@@ -240,10 +244,18 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(
-                "Deep Analysis includes advanced cleanup candidates and read-only paths. "
-                    + "Review each cleanable item before deleting it; read-only items are never removed."
+                "Deep Analysis is read-only and shows content outside Safe Cleanup. Nothing in this mode can be deleted."
             )
         }
+    }
+
+    private var searchField: some View {
+        SystemSearchField(
+            text: $viewModel.searchText,
+            placeholder: String(localized: "Search")
+        )
+        .frame(width: 180)
+        .disabled(viewModel.isScanning || viewModel.isLoadingDetails)
     }
 
     private var scanModeSelection: Binding<ScanMode> {
@@ -266,16 +278,22 @@ struct ContentView: View {
 
     private var bottomActionBar: some View {
         HStack(spacing: 14) {
-            Button {
-                viewModel.performCleanSelected()
-            } label: {
-                Text("Clean")
-            }
-            .disabled(viewModel.selectedIDs.isEmpty || viewModel.isScanning || viewModel.isCleaning)
-            .buttonStyle(.borderedProminent)
+            if viewModel.scanMode == .safeCleanup {
+                Button {
+                    viewModel.performCleanSelected()
+                } label: {
+                    Text("Clean")
+                }
+                .disabled(viewModel.selectedIDs.isEmpty || viewModel.isScanning || viewModel.isCleaning)
+                .buttonStyle(.borderedProminent)
 
-            if !viewModel.selectedIDs.isEmpty {
-                Text("Selected \(formatBytes(viewModel.selectedTotalBytes))")
+                if !viewModel.selectedIDs.isEmpty {
+                    Text("Selected \(formatBytes(viewModel.selectedTotalBytes))")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                Text("Read-only analysis")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
             }
@@ -291,6 +309,50 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
         .background(Color(NSColor.windowBackgroundColor))
+    }
+}
+
+private struct SystemSearchField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.delegate = context.coordinator
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.searchFieldDidAct(_:))
+        field.sendsWholeSearchString = false
+        field.sendsSearchStringImmediately = true
+        field.controlSize = .regular
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return field
+    }
+
+    func updateNSView(_ nsView: NSSearchField, context: Context) {
+        context.coordinator.onChange = { text = $0 }
+        nsView.placeholderString = placeholder
+        nsView.isEnabled = context.environment.isEnabled
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var onChange: (String) -> Void = { _ in }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            onChange(field.stringValue)
+        }
+
+        // The built-in cancel button clears the field without posting a text-change notification.
+        @objc func searchFieldDidAct(_ sender: NSSearchField) {
+            onChange(sender.stringValue)
+        }
     }
 }
 

@@ -27,15 +27,22 @@
     "About Deep Analysis" : {
 
     },
-    "All cleanup candidates plus read-only storage analysis." : {
-
-    },
     "App Caches" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "应用缓存"
+          }
+        }
+      }
+    },
+    "App Container" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用容器"
           }
         }
       }
@@ -56,6 +63,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "应用残留"
+          }
+        }
+      }
+    },
+    "Browser Bridge" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浏览器桥接"
+          }
+        }
+      }
+    },
+    "Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缓存"
           }
         }
       }
@@ -106,12 +133,32 @@
     "Continue" : {
 
     },
+    "Crash Reports" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "崩溃报告"
+          }
+        }
+      }
+    },
     "Deep Analysis" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "深度分析"
+          }
+        }
+      }
+    },
+    "Deep Analysis is read-only and shows content outside Safe Cleanup. Nothing in this mode can be deleted." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "深度分析以只读方式显示安全清理范围外的内容，此模式下不会删除任何项目。"
           }
         }
       }
@@ -128,6 +175,16 @@
     },
     "Docker Data" : {
 
+    },
+    "Empty" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空目录"
+          }
+        }
+      }
     },
     "Enable Full Disk Access" : {
       "localizations" : {
@@ -159,12 +216,43 @@
         }
       }
     },
+    "Installed App Containers" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装应用容器"
+          }
+        }
+      }
+    },
     "iOS Simulator Caches" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "iOS 模拟器缓存"
+          }
+        }
+      }
+    },
+    "Keys & Licenses" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密钥与许可"
+          }
+        }
+      }
+    },
+    "Logs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日志"
           }
         }
       }
@@ -254,6 +342,26 @@
     "Read Only" : {
 
     },
+    "Read-only analysis" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只读分析"
+          }
+        }
+      }
+    },
+    "Read-only content outside Safe Cleanup." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全清理范围外的只读内容。"
+          }
+        }
+      }
+    },
     "Reveal in Finder" : {
       "localizations" : {
         "zh-Hans" : {
@@ -295,6 +403,7 @@
       }
     },
     "Scanning Home…" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -334,6 +443,16 @@
         }
       }
     },
+    "Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "配置"
+          }
+        }
+      }
+    },
     "Size" : {
       "localizations" : {
         "zh-Hans" : {
@@ -364,8 +483,38 @@
         }
       }
     },
+    "Telemetry" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遥测数据"
+          }
+        }
+      }
+    },
     "Unavailable" : {
 
+    },
+    "Updater" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新程序"
+          }
+        }
+      }
+    },
+    "User Data" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用户数据"
+          }
+        }
+      }
     },
     "Website" : {
       "localizations" : {

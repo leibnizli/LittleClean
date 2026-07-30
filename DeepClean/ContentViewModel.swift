@@ -24,11 +24,7 @@ final class ContentViewModel: ObservableObject {
     ]
     @Published var selectedIDs: Set<UUID> = []
     @Published var searchText = ""
-    @Published var scanMode: ScanMode {
-        didSet {
-            UserDefaults.standard.set(scanMode.rawValue, forKey: "scanMode")
-        }
-    }
+    @Published var scanMode: ScanMode = .safeCleanup
 
     private let scanner: FileSystemScanner
     private let cleaner: Cleaner
@@ -42,9 +38,6 @@ final class ContentViewModel: ObservableObject {
         cleaner: Cleaner = Cleaner(),
         updateChecker: UpdateChecker = UpdateChecker()
     ) {
-        self.scanMode = ScanMode(
-            rawValue: UserDefaults.standard.string(forKey: "scanMode") ?? ""
-        ) ?? .safeCleanup
         self.scanner = scanner
         self.cleaner = cleaner
         self.updateChecker = updateChecker
@@ -130,12 +123,14 @@ final class ContentViewModel: ObservableObject {
     }
 
     func performCleanSelected() {
+        guard scanMode == .safeCleanup else { return }
         let items = collectCleanableSelected(from: categories)
         guard !items.isEmpty else { return }
         clean(items, clearingAllSelection: true)
     }
 
     func cleanSingleItem(_ item: CategoryItem) {
+        guard scanMode == .safeCleanup else { return }
         var items: [CategoryItem] = []
         func collectLeaves(_ node: CategoryItem) {
             if let children = node.children, !children.isEmpty {
@@ -150,6 +145,7 @@ final class ContentViewModel: ObservableObject {
     }
 
     func isCleanable(_ item: CategoryItem) -> Bool {
+        guard scanMode == .safeCleanup else { return false }
         if item.rule.cleanType != .none { return true }
         if let children = item.children {
             return children.contains { isCleanable($0) }
@@ -213,13 +209,16 @@ final class ContentViewModel: ObservableObject {
         let scanner = scanner
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let detailItems = scanner.scanDetails()
+            let detailResult = scanner.scanDetails()
             DispatchQueue.main.async {
                 guard let self,
                       token == self.detailsLoadToken,
                       scanToken == self.scanToken,
                       self.scanMode == .deepAnalysis,
                       !self.isScanning else { return }
+                self.needsFullDiskAccess = self.needsFullDiskAccess
+                    || detailResult.containerAccessDenied
+                let detailItems = detailResult.items
                 let existingNames = Set(self.categories.filter(\.isDisplayOnly).map(\.name))
                 for detailItem in detailItems where !existingNames.contains(detailItem.name) {
                     if detailItem.pathDescription == "~/Library/Application Support",
@@ -247,7 +246,9 @@ final class ContentViewModel: ObservableObject {
                             sizeBytes: totalBytes,
                             sizeString: formatBytes(totalBytes),
                             rule: rule,
-                            children: children
+                            children: children,
+                            isDisplayOnly: true,
+                            finderPath: detailItem.finderPath ?? detailItem.pathDescription
                         )
                     } else {
                         self.categories.append(detailItem)
