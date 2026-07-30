@@ -286,7 +286,7 @@ struct ContentView: View {
                 .disabled(viewModel.selectedIDs.isEmpty || viewModel.isScanning || viewModel.isCleaning)
                 .buttonStyle(.borderedProminent)
 
-                Text("Do not select all — choose carefully")
+                Text("Choose carefully")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
 

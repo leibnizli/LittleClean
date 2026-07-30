@@ -42,7 +42,7 @@ nonisolated struct CleanConfig {
         CleanRule(
             name: "Xcode Archives",
             pathDescription: "~/Library/Developer/Xcode/Archives",
-            iconName: "archivebox",
+            iconName: "archivebox.fill",
             iconColor: .indigo,
             note: "Xcode Archives",
             scanMode: .deepAnalysis

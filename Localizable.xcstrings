@@ -187,12 +187,12 @@
         }
       }
     },
-    "Do not select all — choose carefully" : {
+    "Choose carefully" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请勿全选，谨慎勾选"
+            "value" : "谨慎勾选"
           }
         }
       }

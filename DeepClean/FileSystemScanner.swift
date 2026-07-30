@@ -1378,33 +1378,6 @@ nonisolated struct FileSystemScanner: Sendable {
             }
         }
 
-        // Extract top-level subfolders and files to give real content context
-        var topSubfolders: [String] = []
-        var topFiles: [String] = []
-        for entry in filteredEntries {
-            let fullEntryPath = (path as NSString).appendingPathComponent(entry)
-            var isDir: ObjCBool = false
-            if fileManager.fileExists(atPath: fullEntryPath, isDirectory: &isDir) {
-                if isDir.boolValue {
-                    topSubfolders.append(entry)
-                } else {
-                    topFiles.append(entry)
-                }
-            }
-        }
-
-        func formatSample(from items: [String], maxItems: Int = 3) -> String {
-            if items.isEmpty { return "" }
-            let sample = items.prefix(maxItems)
-            let joined = sample.joined(separator: ", ")
-            if items.count > maxItems {
-                return "\(joined) (+\(items.count - maxItems))"
-            }
-            return joined
-        }
-
-        let prominentItems = !topSubfolders.isEmpty ? topSubfolders : topFiles
-
         let ranked = scores
             .filter { $0.value > 0 }
             .sorted {
@@ -1427,30 +1400,14 @@ nonisolated struct FileSystemScanner: Sendable {
         if !ranked.isEmpty {
             if ranked.count == 1 {
                 let singleCatName = ranked[0].key.localizedName
-                let sample = formatSample(from: prominentItems, maxItems: 3)
-                let body: String
-                if !sample.isEmpty && sample.lowercased() != singleCatName.lowercased() {
-                    body = "\(singleCatName) (\(sample))"
-                } else {
-                    body = singleCatName
-                }
-                return buildNote(body: body)
+                return buildNote(body: singleCatName)
             } else {
                 let catNames = ranked.prefix(3).map { $0.key.localizedName }
                 let catJoined = catNames.joined(separator: " · ")
-                let sample = formatSample(from: prominentItems, maxItems: 2)
-                let body: String
-                if !sample.isEmpty {
-                    body = "\(catJoined) (\(sample))"
-                } else {
-                    body = catJoined
-                }
-                return buildNote(body: body)
+                return buildNote(body: catJoined)
             }
         } else {
-            let sample = formatSample(from: prominentItems, maxItems: 3)
-            let body = !sample.isEmpty ? sample : "App Data"
-            return buildNote(body: body)
+            return buildNote(body: "App Data")
         }
     }
 
