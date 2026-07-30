@@ -4,6 +4,9 @@ import SwiftUI
 @MainActor
 struct ContentView: View {
     @StateObject private var viewModel = ContentViewModel()
+    @AppStorage("hasSeenDeepAnalysisIntroduction")
+    private var hasSeenDeepAnalysisIntroduction = false
+    @State private var isShowingDeepAnalysisIntroduction = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,9 +17,17 @@ struct ContentView: View {
             bottomActionBar
         }
         .frame(minWidth: 720, minHeight: 460)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                scanModePicker
+            }
+        }
         .onAppear {
             viewModel.performScan()
             viewModel.checkForUpdates()
+        }
+        .onChange(of: viewModel.scanMode) { _, _ in
+            viewModel.performScan()
         }
         .searchable(text: $viewModel.searchText, prompt: "Search")
         .alert(
@@ -203,6 +214,51 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
         .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private var scanModePicker: some View {
+        Picker("Mode", selection: scanModeSelection) {
+            Text("Safe Cleanup")
+                .tag(ScanMode.safeCleanup)
+            Text("Deep Analysis")
+                .tag(ScanMode.deepAnalysis)
+        }
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .disabled(viewModel.isCleaning)
+        .help(
+            viewModel.scanMode == .safeCleanup
+                ? "Lower-risk paths that can be cleaned."
+                : "All cleanup candidates plus read-only storage analysis."
+        )
+        .alert(
+            "About Deep Analysis",
+            isPresented: $isShowingDeepAnalysisIntroduction
+        ) {
+            Button("Continue") {
+                hasSeenDeepAnalysisIntroduction = true
+                viewModel.scanMode = .deepAnalysis
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Deep Analysis includes advanced cleanup candidates and read-only paths. "
+                    + "Review each cleanable item before deleting it; read-only items are never removed."
+            )
+        }
+    }
+
+    private var scanModeSelection: Binding<ScanMode> {
+        Binding(
+            get: { viewModel.scanMode },
+            set: { newMode in
+                if newMode == .deepAnalysis && !hasSeenDeepAnalysisIntroduction {
+                    isShowingDeepAnalysisIntroduction = true
+                } else {
+                    viewModel.scanMode = newMode
+                }
+            }
+        )
     }
 
     // MARK: - Bottom Action Bar

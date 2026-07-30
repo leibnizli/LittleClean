@@ -19,10 +19,16 @@ final class ContentViewModel: ObservableObject {
     ]
     @Published var selectedIDs: Set<UUID> = []
     @Published var searchText = ""
+    @Published var scanMode: ScanMode {
+        didSet {
+            UserDefaults.standard.set(scanMode.rawValue, forKey: "scanMode")
+        }
+    }
 
     private let scanner: FileSystemScanner
     private let cleaner: Cleaner
     private let updateChecker: UpdateChecker
+    private var scanToken = 0
     private var detailsLoadToken = 0
 
     init(
@@ -30,6 +36,9 @@ final class ContentViewModel: ObservableObject {
         cleaner: Cleaner = Cleaner(),
         updateChecker: UpdateChecker = UpdateChecker()
     ) {
+        self.scanMode = ScanMode(
+            rawValue: UserDefaults.standard.string(forKey: "scanMode") ?? ""
+        ) ?? .safeCleanup
         self.scanner = scanner
         self.cleaner = cleaner
         self.updateChecker = updateChecker
@@ -56,20 +65,27 @@ final class ContentViewModel: ObservableObject {
     }
 
     func performScan() {
+        scanToken += 1
+        let token = scanToken
+        let mode = scanMode
+        detailsLoadToken += 1
         isScanning = true
         isLoadingDetails = false
+        categories = []
+        selectedIDs = []
         loadRealDiskSpace()
 
         let scanner = scanner
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = scanner.scanCategories()
+            let result = scanner.scanCategories(mode: mode)
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, token == self.scanToken, mode == self.scanMode else { return }
                 self.categories = result.categories
                 self.needsFullDiskAccess = result.containerAccessDenied
-                self.selectedIDs = []
                 self.isScanning = false
-                self.loadDetails()
+                if mode == .deepAnalysis {
+                    self.loadDetails(for: token)
+                }
             }
         }
     }
@@ -159,7 +175,7 @@ final class ContentViewModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    private func loadDetails() {
+    private func loadDetails(for scanToken: Int) {
         detailsLoadToken += 1
         let token = detailsLoadToken
         isLoadingDetails = true
@@ -168,7 +184,11 @@ final class ContentViewModel: ObservableObject {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let detailItems = scanner.scanDetails()
             DispatchQueue.main.async {
-                guard let self, token == self.detailsLoadToken, !self.isScanning else { return }
+                guard let self,
+                      token == self.detailsLoadToken,
+                      scanToken == self.scanToken,
+                      self.scanMode == .deepAnalysis,
+                      !self.isScanning else { return }
                 let existingNames = Set(self.categories.filter(\.isDisplayOnly).map(\.name))
                 for detailItem in detailItems where !existingNames.contains(detailItem.name) {
                     if detailItem.pathDescription == "~/Library/Application Support",

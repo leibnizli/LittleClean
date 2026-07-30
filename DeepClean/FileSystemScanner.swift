@@ -7,12 +7,12 @@ nonisolated struct CategoryScanResult: Sendable {
 
 nonisolated struct FileSystemScanner: Sendable {
     // Scan configured paths synchronously. Callers are responsible for running this off the main thread.
-    func scanCategories() -> CategoryScanResult {
+    func scanCategories(mode: ScanMode) -> CategoryScanResult {
         var foundCategories: [CategoryItem] = []
         var containerAccessDenied = false
         let fileManager = FileManager.default
 
-        for rule in CleanConfig.defaultRules {
+        for rule in CleanConfig.defaultRules where mode.includes(rule.minimumScanMode) {
             let expandedPath = NSString(string: rule.pathDescription).expandingTildeInPath
             var isDirectory: ObjCBool = false
 
@@ -29,7 +29,9 @@ nonisolated struct FileSystemScanner: Sendable {
             } else if rule.isDynamicHomeCleanupRule {
                 var allChildren: [CategoryItem] = []
                 allChildren.append(contentsOf: scanHomeCaches(basePath: rule.pathDescription))
-                allChildren.append(contentsOf: scanHomeLeftovers(basePath: rule.pathDescription))
+                if mode == .deepAnalysis {
+                    allChildren.append(contentsOf: scanHomeLeftovers(basePath: rule.pathDescription))
+                }
 
                 if !allChildren.isEmpty {
                     let totalBytes = allChildren.reduce(0) { $0 + $1.sizeBytes }
@@ -43,7 +45,9 @@ nonisolated struct FileSystemScanner: Sendable {
                         rule: rule,
                         children: allChildren
                     )
-                    parent.displayPath = "~ (Caches & Leftovers)"
+                    parent.displayPath = mode == .deepAnalysis
+                        ? "~ (Caches & Leftovers)"
+                        : "~ (Caches)"
                     foundCategories.append(parent)
                 }
             } else if fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) {

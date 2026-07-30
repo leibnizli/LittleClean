@@ -1,5 +1,16 @@
 import SwiftUI
 
+nonisolated enum ScanMode: String, CaseIterable, Identifiable, Sendable {
+    case safeCleanup
+    case deepAnalysis
+
+    var id: String { rawValue }
+
+    func includes(_ minimumMode: ScanMode) -> Bool {
+        self == .deepAnalysis || minimumMode == .safeCleanup
+    }
+}
+
 nonisolated enum CleanType: Equatable, Sendable {
     case none
     case deleteDirectory        // clear contents, keep the folder (caches)
@@ -23,6 +34,7 @@ nonisolated struct CleanRule: Identifiable, @unchecked Sendable {
     var isDynamicUnavailableSimulatorRule: Bool = false
     var isDynamicContainerLeftoversRule: Bool = false
     var isCheckboxHidden: Bool = false
+    var minimumScanMode: ScanMode = .safeCleanup
 }
 
 nonisolated struct CleanConfig {
@@ -31,7 +43,14 @@ nonisolated struct CleanConfig {
         CleanRule(name: "System Logs", pathDescription: "~/Library/Logs", iconName: "doc.text.fill", iconColor: .blue, note: "System Logs"),
         CleanRule(name: "System Trash", pathDescription: "~/.Trash", iconName: "trash.fill", iconColor: .red, note: "System Trash"),
         CleanRule(name: "Xcode DerivedData", pathDescription: "~/Library/Developer/Xcode/DerivedData", iconName: "hammer.fill", iconColor: .purple, note: "Xcode DerivedData"),
-        CleanRule(name: "Xcode Archives", pathDescription: "~/Library/Developer/Xcode/Archives", iconName: "archivebox", iconColor: .indigo, note: "Xcode Archives"),
+        CleanRule(
+            name: "Xcode Archives",
+            pathDescription: "~/Library/Developer/Xcode/Archives",
+            iconName: "archivebox",
+            iconColor: .indigo,
+            note: "Xcode Archives",
+            minimumScanMode: .deepAnalysis
+        ),
         CleanRule(name: "iOS Simulator Caches", pathDescription: "~/Library/Developer/CoreSimulator/Caches", iconName: "iphone", iconColor: .teal, note: "iOS Simulator Caches"),
         CleanRule(
             name: "Simulator Devices by Version",
@@ -39,7 +58,8 @@ nonisolated struct CleanConfig {
             iconName: "iphone.badge.play",
             iconColor: .purple,
             isDynamicSimulatorRule: true,
-            isCheckboxHidden: true
+            isCheckboxHidden: true,
+            minimumScanMode: .deepAnalysis
         ),
         CleanRule(
             name: "Unavailable Simulators",
@@ -47,7 +67,8 @@ nonisolated struct CleanConfig {
             iconName: "iphone.slash",
             iconColor: .red,
             isDynamicUnavailableSimulatorRule: true,
-            isCheckboxHidden: true
+            isCheckboxHidden: true,
+            minimumScanMode: .deepAnalysis
         ),
         CleanRule(
             name: "Uninstalled App Leftovers",
@@ -55,7 +76,8 @@ nonisolated struct CleanConfig {
             iconName: "folder.fill",
             iconColor: .pink,
             isDynamicLeftoversRule: true,
-            isCheckboxHidden: true
+            isCheckboxHidden: true,
+            minimumScanMode: .deepAnalysis
         ),
         CleanRule(
             name: "Container Leftovers",
@@ -63,7 +85,8 @@ nonisolated struct CleanConfig {
             iconName: "shippingbox.fill",
             iconColor: .pink,
             isDynamicContainerLeftoversRule: true,
-            isCheckboxHidden: true
+            isCheckboxHidden: true,
+            minimumScanMode: .deepAnalysis
         ),
         CleanRule(name: "Saved App State", pathDescription: "~/Library/Saved Application State", iconName: "clock.arrow.circlepath", iconColor: .mint, note: "Saved App State"),
         CleanRule(

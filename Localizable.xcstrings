@@ -1,7 +1,9 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "" : {},
+    "" : {
+
+    },
     "%@ / %@" : {
       "localizations" : {
         "en" : {
@@ -21,6 +23,12 @@
           }
         }
       }
+    },
+    "About Deep Analysis" : {
+
+    },
+    "All cleanup candidates plus read-only storage analysis." : {
+
     },
     "App Caches" : {
       "localizations" : {
@@ -51,6 +59,9 @@
           }
         }
       }
+    },
+    "Cancel" : {
+
     },
     "Clean" : {
       "localizations" : {
@@ -92,6 +103,12 @@
         }
       }
     },
+    "Continue" : {
+
+    },
+    "Deep Analysis" : {
+
+    },
     "Deletion Failed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -102,7 +119,9 @@
         }
       }
     },
-    "Docker Data" : {},
+    "Docker Data" : {
+
+    },
     "Enable Full Disk Access" : {
       "localizations" : {
         "zh-Hans" : {
@@ -143,7 +162,25 @@
         }
       }
     },
-    "Missing Runtime" : {},
+    "Lower-risk paths that can be cleaned." : {
+
+    },
+    "macOS blocked access to another app's protected container. Grant DeepClean Full Disk Access, then quit and reopen the app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 阻止了对其他应用受保护容器的访问。请授予 DeepClean 完全磁盘访问权限，然后退出并重新打开应用。"
+          }
+        }
+      }
+    },
+    "Missing Runtime" : {
+
+    },
+    "Mode" : {
+
+    },
     "New Version Available" : {
       "localizations" : {
         "zh-Hans" : {
@@ -154,7 +191,9 @@
         }
       }
     },
-    "No Global Packages" : {},
+    "No Global Packages" : {
+
+    },
     "Non-system Items" : {
       "localizations" : {
         "zh-Hans" : {
@@ -171,6 +210,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "说明"
+          }
+        }
+      }
+    },
+    "OK" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
           }
         }
       }
@@ -195,7 +244,9 @@
         }
       }
     },
-    "Read Only" : {},
+    "Read Only" : {
+
+    },
     "Reveal in Finder" : {
       "localizations" : {
         "zh-Hans" : {
@@ -206,15 +257,8 @@
         }
       }
     },
-    "OK" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "好"
-          }
-        }
-      }
+    "Safe Cleanup" : {
+
     },
     "Saved App State" : {
       "localizations" : {
@@ -306,23 +350,15 @@
         }
       }
     },
-    "Unavailable" : {},
+    "Unavailable" : {
+
+    },
     "Website" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "官方网站"
-          }
-        }
-      }
-    },
-    "macOS blocked access to another app's protected container. Grant DeepClean Full Disk Access, then quit and reopen the app." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "macOS 阻止了对其他应用受保护容器的访问。请授予 DeepClean 完全磁盘访问权限，然后退出并重新打开应用。"
           }
         }
       }
