@@ -188,9 +188,12 @@ final class ContentViewModel: ObservableObject {
         let url = URL(fileURLWithPath: expandedPath)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: expandedPath, isDirectory: &isDirectory) else { return }
-        if expandedPath.hasSuffix(".app") || !isDirectory.boolValue {
+        if expandedPath.hasSuffix(".app") {
             NSWorkspace.shared.activateFileViewerSelecting([url])
-        } else if !NSWorkspace.shared.open(url) {
+        } else {
+            // activateFileViewerSelecting explicitly reveals the item in Finder instead of "executing" it.
+            // This prevents LaunchServices from incorrectly treating sandboxed containers 
+            // or uninstalled app leftovers as documents that need to be launched.
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }
     }
