@@ -273,6 +273,16 @@
     "Missing Runtime" : {
 
     },
+    "Mixed Data" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "混合数据"
+          }
+        }
+      }
+    },
     "Mode" : {
 
     },

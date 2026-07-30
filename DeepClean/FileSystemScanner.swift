@@ -1102,76 +1102,210 @@ nonisolated struct FileSystemScanner: Sendable {
         "yarn.lock": ("lock.fill", .blue)
     ]
 
-    // What a leftover folder actually holds. Whether an app was ever installed is not
-    // decidable, but what its folder contains is, and that is what lets the user judge:
-    // a crash log directory and a folder holding a private key warrant different answers.
-    // Read from the folder's own structure rather than a name list, which cannot keep up
-    // with software that did not exist when the list was written.
-    private func describeLeftoverContents(at path: String) -> LocalizedStringKey? {
+    private enum DirectoryContentKind: CaseIterable {
+        case keysAndLicenses
+        case userData
+        case browserBridge
+        case crashReports
+        case telemetry
+        case updater
+        case logs
+        case cache
+        case settings
+
+        var baseScore: Int {
+            switch self {
+            case .keysAndLicenses: return 12
+            case .browserBridge: return 10
+            case .userData: return 8
+            case .crashReports, .telemetry, .updater, .logs, .cache: return 6
+            case .settings: return 5
+            }
+        }
+
+        var note: LocalizedStringKey {
+            switch self {
+            case .keysAndLicenses: return "Keys & Licenses"
+            case .userData: return "User Data"
+            case .browserBridge: return "Browser Bridge"
+            case .crashReports: return "Crash Reports"
+            case .telemetry: return "Telemetry"
+            case .updater: return "Updater"
+            case .logs: return "Logs"
+            case .cache: return "Cache"
+            case .settings: return "Settings"
+            }
+        }
+    }
+
+    // Describe only the kinds of content found in a directory. This classification is
+    // deliberately independent from whether the directory is a leftover or safe to delete.
+    // Sampling is bounded so it works for arbitrary apps without making scans unreasonably slow.
+    private func describeDirectoryContents(at path: String) -> LocalizedStringKey? {
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(atPath: path) else { return nil }
-        let visible = entries.filter { !$0.hasPrefix(".") }
-        if visible.isEmpty { return "Empty" }
+        let ignoredMetadata = Set([".ds_store", ".localized"])
+        guard entries.contains(where: { !ignoredMetadata.contains($0.lowercased()) }) else {
+            return "Empty"
+        }
 
-        // The folder's own name is evidence too: "com.tencent.bugly" says what it holds
-        // even though its contents are opaque. One level down as well, because the telling
-        // file is usually inside a subfolder, as in "cloud-code/intellij/credentials.json".
-        var signature = Set(visible.map { $0.lowercased() })
-        signature.insert((path as NSString).lastPathComponent.lowercased())
-        for entry in visible {
-            let child = (path as NSString).appendingPathComponent(entry)
-            var isDirectory: ObjCBool = false
-            guard fileManager.fileExists(atPath: child, isDirectory: &isDirectory),
-                  isDirectory.boolValue,
-                  let children = try? fileManager.contentsOfDirectory(atPath: child) else {
-                continue
+        var scores = Dictionary(
+            uniqueKeysWithValues: DirectoryContentKind.allCases.map { ($0, 0) }
+        )
+        var seenSignals = Dictionary(
+            uniqueKeysWithValues: DirectoryContentKind.allCases.map { ($0, Set<String>()) }
+        )
+
+        func words(in value: String) -> Set<String> {
+            Set(
+                value.lowercased()
+                    .split { !$0.isLetter && !$0.isNumber }
+                    .map(String.init)
+            )
+        }
+
+        func inspect(_ rawName: String, depth: Int) {
+            let name = rawName.lowercased()
+            guard !ignoredMetadata.contains(name) else { return }
+
+            let nameWords = words(in: name)
+            let depthBonus = max(0, 4 - depth)
+
+            func hasAnyWord(_ candidates: Set<String>) -> Bool {
+                !nameWords.isDisjoint(with: candidates)
             }
-            for name in children.prefix(24) where !name.hasPrefix(".") {
-                signature.insert(name.lowercased())
+
+            func containsAny(_ candidates: [String]) -> Bool {
+                candidates.contains { name.contains($0) }
+            }
+
+            func hasAnySuffix(_ candidates: [String]) -> Bool {
+                candidates.contains { name.hasSuffix($0) }
+            }
+
+            func record(_ kind: DirectoryContentKind, when matched: Bool) {
+                guard matched, seenSignals[kind, default: []].insert(name).inserted else {
+                    return
+                }
+                scores[kind, default: 0] = min(
+                    24,
+                    scores[kind, default: 0] + kind.baseScore + depthBonus
+                )
+            }
+
+            record(
+                .keysAndLicenses,
+                when: hasAnyWord([
+                    "credential", "credentials", "license", "licenses", "licence", "licences",
+                    "keychain", "keystore", "truststore", "secret", "secrets", "certificate",
+                    "certificates", "token", "tokens"
+                ]) || hasAnySuffix([
+                    ".pem", ".key", ".p12", ".pfx", ".cer", ".crt", ".mobileprovision"
+                ])
+            )
+            record(
+                .userData,
+                when: hasAnyWord([
+                    "document", "documents", "project", "projects", "workspace", "workspaces",
+                    "session", "sessions", "conversation", "conversations", "history", "histories",
+                    "profile", "profiles", "preset", "presets", "template", "templates",
+                    "connection", "connections", "conn", "database", "databases", "bookmark",
+                    "bookmarks", "myplaces", "inventory"
+                ]) || hasAnySuffix([".fcpworkspace", ".sublime_session"])
+            )
+            record(
+                .browserBridge,
+                when: containsAny(["nativemessaginghosts", "native-messaging-hosts"])
+            )
+            record(
+                .crashReports,
+                when: hasAnyWord(["crash", "crashes"]) || containsAny([
+                    "crashreport", "crash-report", "crashpad", "kscrash", "bugsnag", "bugly",
+                    "sentry"
+                ])
+            )
+            record(
+                .telemetry,
+                when: hasAnyWord(["telemetry", "analytics"]) || containsAny([
+                    "segment-events", "usage-statistics", "usage_statistics", "countly"
+                ])
+            )
+            record(
+                .updater,
+                when: hasAnyWord(["update", "updates", "updater", "installer"])
+            )
+            record(
+                .logs,
+                when: hasAnyWord(["log", "logs", "diagnostic", "diagnostics"])
+                    || hasAnySuffix([".log"])
+            )
+            record(
+                .cache,
+                when: hasAnyWord([
+                    "cache", "caches", "cached", "temp", "tmp", "temporary", "thumbnail",
+                    "thumbnails"
+                ])
+            )
+            record(
+                .settings,
+                when: hasAnyWord([
+                    "config", "configs", "configuration", "settings", "setting", "preferences",
+                    "preference", "options", "prefs", "pref"
+                ]) || hasAnySuffix([".plist", ".ini"])
+            )
+        }
+
+        // The app/vendor folder name can carry useful evidence (for example, an updater
+        // or crash-reporting framework), but receives no depth bonus.
+        inspect((path as NSString).lastPathComponent, depth: 4)
+
+        let rootURL = URL(fileURLWithPath: path, isDirectory: true)
+        let resourceKeys: [URLResourceKey] = [.isDirectoryKey]
+        if let enumerator = fileManager.enumerator(
+            at: rootURL,
+            includingPropertiesForKeys: resourceKeys,
+            options: [],
+            errorHandler: { _, _ in true }
+        ) {
+            let maxDepth = 6
+            let maxEntries = 256
+            var sampledEntries = 0
+
+            while sampledEntries < maxEntries,
+                  let itemURL = enumerator.nextObject() as? URL {
+                let depth = enumerator.level
+                if depth > maxDepth {
+                    enumerator.skipDescendants()
+                    continue
+                }
+
+                inspect(itemURL.lastPathComponent, depth: depth)
+                sampledEntries += 1
+
+                if depth == maxDepth,
+                   (try? itemURL.resourceValues(forKeys: Set(resourceKeys)).isDirectory) == true {
+                    enumerator.skipDescendants()
+                }
             }
         }
 
-        func contains(_ needles: [String]) -> Bool {
-            signature.contains { entry in needles.contains { entry.contains($0) } }
-        }
+        let ranked = scores
+            .filter { $0.value > 0 }
+            .sorted {
+                if $0.value == $1.value {
+                    return $0.key.baseScore > $1.key.baseScore
+                }
+                return $0.value > $1.value
+            }
 
-        // Reasons to keep a folder are checked before reasons to delete it, so that a
-        // directory holding both a crash log and a saved session reads as user data.
-        if contains(["credential", "license", "licence", "certificate-authority", "keychain",
-                     "secret", ".pem", ".key", "token"]) {
-            return "Keys & Licenses"
+        guard let strongest = ranked.first else { return "App Data" }
+        if ranked.count > 1 {
+            let secondScore = ranked[1].value
+            if secondScore >= 6, secondScore * 5 >= strongest.value * 3 {
+                return "Mixed Data"
+            }
         }
-        // "library" is deliberately absent: every sandbox container has a Data/Library,
-        // so it would label nearly all of them as user data.
-        if contains(["documents", "desktop", "session", "workspace", "conversation",
-                     "myplaces", "inventory", "profiles", "packages", "team data"]) {
-            return "User Data"
-        }
-        // Registered by some other app to talk to a browser, so removing it breaks that
-        // app rather than the browser the folder is named after.
-        if signature.contains("nativemessaginghosts") {
-            return "Browser Bridge"
-        }
-        if contains(["appcenter", "bugsnag", "bugly", "sentry", "crashreport", "crashes",
-                     "kscrash", "crashpad"]) {
-            return "Crash Reports"
-        }
-        if contains(["telemetry", "analytics", "segment-events", "countly", "deviceid"]) {
-            return "Telemetry"
-        }
-        if contains(["update", "installer"]) {
-            return "Updater"
-        }
-        if contains(["log", "diagnostic"]) {
-            return "Logs"
-        }
-        if contains(["cache", "temp", "daemon"]) {
-            return "Cache"
-        }
-        if contains([".plist", ".ini", ".json", "config", "settings", "preference"]) {
-            return "Settings"
-        }
-        return "App Data"
+        return strongest.key.note
     }
 
     // Dynamically scan for folders in Application Support that belong to UNINSTALLED applications
@@ -1226,7 +1360,7 @@ nonisolated struct FileSystemScanner: Sendable {
                     iconName: "folder.badge.minus",
                     iconColor: .pink,
                     cleanType: .deleteDirectoryTree,
-                    note: describeLeftoverContents(at: fullPath)
+                    note: describeDirectoryContents(at: fullPath)
                 )
 
                 let childItem = CategoryItem(
@@ -1345,7 +1479,7 @@ nonisolated struct FileSystemScanner: Sendable {
                 iconName: "shippingbox.fill",
                 iconColor: .pink,
                 cleanType: .deleteDirectoryTree,
-                note: describeLeftoverContents(at: dataPath) ?? describeLeftoverContents(at: fullPath)
+                note: describeDirectoryContents(at: dataPath) ?? describeDirectoryContents(at: fullPath)
             )
 
             let childItem = CategoryItem(
