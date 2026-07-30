@@ -173,6 +173,16 @@
         }
       }
     },
+    "Do not select all — choose carefully" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请勿全选，谨慎勾选"
+          }
+        }
+      }
+    },
     "Docker Data" : {
 
     },
