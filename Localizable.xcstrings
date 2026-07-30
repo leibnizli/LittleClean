@@ -8,7 +8,7 @@
       "localizations" : {
         "en" : {
           "stringUnit" : {
-            "state" : "new",
+            "state" : "translated",
             "value" : "%1$@ · %2$@"
           }
         }
@@ -18,7 +18,7 @@
       "localizations" : {
         "en" : {
           "stringUnit" : {
-            "state" : "new",
+            "state" : "translated",
             "value" : "%1$@ / %2$@"
           }
         }
@@ -47,6 +47,16 @@
         }
       }
     },
+    "App cannot accurately determine deletable items. Please review carefully." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "软件无法准确确定可删除项目，请谨慎核对"
+          }
+        }
+      }
+    },
     "App Data" : {
       "localizations" : {
         "zh-Hans" : {
@@ -69,16 +79,6 @@
     },
     "Cancel" : {
 
-    },
-    "Choose carefully" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "谨慎勾选"
-          }
-        }
-      }
     },
     "Clean" : {
       "localizations" : {

@@ -285,7 +285,7 @@ struct ContentView: View {
                 .disabled(viewModel.selectedIDs.isEmpty || viewModel.isScanning || viewModel.isCleaning)
                 .buttonStyle(.borderedProminent)
 
-                Text("Choose carefully")
+                Text("App cannot accurately determine deletable items. Please review carefully.")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
 
