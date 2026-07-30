@@ -4,6 +4,11 @@ import SwiftUI
 
 @MainActor
 final class ContentViewModel: ObservableObject {
+    private struct ScanSnapshot {
+        let categories: [CategoryItem]
+        let needsFullDiskAccess: Bool
+    }
+
     @Published var totalBytes: Int64 = 0
     @Published var freeBytes: Int64 = 0
     @Published var usedBytes: Int64 = 0
@@ -28,6 +33,7 @@ final class ContentViewModel: ObservableObject {
     private let scanner: FileSystemScanner
     private let cleaner: Cleaner
     private let updateChecker: UpdateChecker
+    private var scanCache: [ScanMode: ScanSnapshot] = [:]
     private var scanToken = 0
     private var detailsLoadToken = 0
 
@@ -64,11 +70,34 @@ final class ContentViewModel: ObservableObject {
         return result
     }
 
+    func selectScanMode(_ mode: ScanMode) {
+        guard mode != scanMode else { return }
+        scanMode = mode
+        activateScanMode()
+    }
+
+    private func activateScanMode() {
+        scanToken += 1
+        detailsLoadToken += 1
+        isScanning = false
+        isLoadingDetails = false
+        selectedIDs = []
+
+        if let snapshot = scanCache[scanMode] {
+            categories = snapshot.categories
+            needsFullDiskAccess = snapshot.needsFullDiskAccess
+            loadRealDiskSpace()
+        } else {
+            performScan()
+        }
+    }
+
     func performScan() {
         scanToken += 1
         let token = scanToken
         let mode = scanMode
         detailsLoadToken += 1
+        scanCache[mode] = nil
         isScanning = true
         isLoadingDetails = false
         categories = []
@@ -85,6 +114,8 @@ final class ContentViewModel: ObservableObject {
                 self.isScanning = false
                 if mode == .deepAnalysis {
                     self.loadDetails(for: token)
+                } else {
+                    self.cacheCurrentScan(for: mode)
                 }
             }
         }
@@ -223,6 +254,7 @@ final class ContentViewModel: ObservableObject {
                     }
                 }
                 self.isLoadingDetails = false
+                self.cacheCurrentScan(for: .deepAnalysis)
             }
         }
     }
@@ -251,9 +283,18 @@ final class ContentViewModel: ObservableObject {
                 } else {
                     self.selectedIDs.subtract(cleanedIDs)
                 }
+                self.scanCache.removeAll()
+                self.cacheCurrentScan(for: self.scanMode)
                 self.loadRealDiskSpace()
             }
         }
+    }
+
+    private func cacheCurrentScan(for mode: ScanMode) {
+        scanCache[mode] = ScanSnapshot(
+            categories: categories,
+            needsFullDiskAccess: needsFullDiskAccess
+        )
     }
 
     private func cleanFailureMessage(_ failures: [CleanFailure]) -> String {

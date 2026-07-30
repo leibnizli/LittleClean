@@ -107,7 +107,14 @@
 
     },
     "Deep Analysis" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "深度分析"
+          }
+        }
+      }
     },
     "Deletion Failed" : {
       "localizations" : {
@@ -258,7 +265,14 @@
       }
     },
     "Safe Cleanup" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全清理"
+          }
+        }
+      }
     },
     "Saved App State" : {
       "localizations" : {

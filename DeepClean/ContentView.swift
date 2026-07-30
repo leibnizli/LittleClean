@@ -26,10 +26,8 @@ struct ContentView: View {
             viewModel.performScan()
             viewModel.checkForUpdates()
         }
-        .onChange(of: viewModel.scanMode) { _, _ in
-            viewModel.performScan()
-        }
         .searchable(text: $viewModel.searchText, prompt: "Search")
+        .disabled(viewModel.isScanning || viewModel.isLoadingDetails)
         .alert(
             "Deletion Failed",
             isPresented: Binding(
@@ -225,7 +223,7 @@ struct ContentView: View {
         }
         .pickerStyle(.segmented)
         .controlSize(.small)
-        .disabled(viewModel.isCleaning)
+        .disabled(viewModel.isScanning || viewModel.isLoadingDetails || viewModel.isCleaning)
         .help(
             viewModel.scanMode == .safeCleanup
                 ? "Lower-risk paths that can be cleaned."
@@ -237,7 +235,7 @@ struct ContentView: View {
         ) {
             Button("Continue") {
                 hasSeenDeepAnalysisIntroduction = true
-                viewModel.scanMode = .deepAnalysis
+                viewModel.selectScanMode(.deepAnalysis)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -255,7 +253,10 @@ struct ContentView: View {
                 if newMode == .deepAnalysis && !hasSeenDeepAnalysisIntroduction {
                     isShowingDeepAnalysisIntroduction = true
                 } else {
-                    viewModel.scanMode = newMode
+                    Task { @MainActor in
+                        await Task.yield()
+                        viewModel.selectScanMode(newMode)
+                    }
                 }
             }
         )

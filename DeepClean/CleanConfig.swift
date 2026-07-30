@@ -1,6 +1,6 @@
 import SwiftUI
 
-nonisolated enum ScanMode: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum ScanMode: String, CaseIterable, Hashable, Identifiable, Sendable {
     case safeCleanup
     case deepAnalysis
 
