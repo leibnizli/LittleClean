@@ -1146,10 +1146,26 @@ nonisolated struct FileSystemScanner: Sendable {
         }
     }
 
-    private func resolveAppName(for identifier: String, path: String) -> String? {
+    private func resolveAppName(for rawIdentifier: String, path: String) -> String? {
         let fileManager = FileManager.default
 
-        // 1. If identifier looks like a bundle id (e.g. com.tencent.xinWeChat, com.apple.Safari)
+        // If identifier is a generic subdirectory name like "Data", "Library", "System", "Contents",
+        // look up the path hierarchy for the real app/bundle folder name.
+        var identifier = rawIdentifier
+        let pathComponents = (path as NSString).pathComponents
+        let genericNames = Set(["data", "library", "contents", "application support", "containers", "group containers", "caches"])
+
+        if genericNames.contains(identifier.lowercased()) {
+            for component in pathComponents.reversed() {
+                let lower = component.lowercased()
+                if !genericNames.contains(lower) && !lower.hasPrefix("~") && lower != "/" && lower != "users" {
+                    identifier = component
+                    break
+                }
+            }
+        }
+
+        // 1. If identifier looks like a bundle id (e.g. com.tencent.xinWeChat, com.docker.docker)
         if identifier.contains(".") && !identifier.hasPrefix(".") {
             let cleanID = identifier.trimmingCharacters(in: .whitespaces)
             var bundleID = cleanID
@@ -1175,28 +1191,18 @@ nonisolated struct FileSystemScanner: Sendable {
                 }
             }
 
-            // Check parent folder if path has parent info (e.g., ~/Library/Application Support/Google/Chrome -> Google Chrome)
-            let pathComponents = (path as NSString).pathComponents
-            if pathComponents.count >= 2 {
-                let parent = pathComponents[pathComponents.count - 2]
-                let lowerParent = parent.lowercased()
-                if !lowerParent.contains("application support") && !lowerParent.contains("containers") && !lowerParent.contains("caches") && !lowerParent.hasPrefix("~") {
-                    return "\(parent) \(identifier)"
-                }
-            }
-
-            // Fallback: parse last component of bundle ID into readable name
+            // Fallback: parse last component of bundle ID into readable product name
             if let last = components.last {
                 let cleanLast = String(last)
                     .replacingOccurrences(of: "-", with: " ")
                     .replacingOccurrences(of: "_", with: " ")
                 let words = cleanLast.split(separator: " ").map { $0.capitalized }.joined(separator: " ")
                 let lowerWords = words.lowercased()
-                if !words.isEmpty && lowerWords != "app" && lowerWords != "mac" && lowerWords != "helper" {
+                if !words.isEmpty && lowerWords != "app" && lowerWords != "mac" && lowerWords != "helper" && lowerWords != "desktop" {
                     if components.count >= 2 {
                         let vendor = String(components[1]).capitalized
                         let lowerVendor = vendor.lowercased()
-                        if lowerVendor != "com" && lowerVendor != "org" && lowerVendor != "net" && lowerVendor != lowerWords {
+                        if lowerVendor != "com" && lowerVendor != "org" && lowerVendor != "net" && lowerVendor != lowerWords && lowerVendor != "github" && lowerVendor != "apple" {
                             return "\(vendor) \(words)"
                         }
                     }
@@ -1206,15 +1212,10 @@ nonisolated struct FileSystemScanner: Sendable {
         }
 
         // 2. Check if parent folder carries product brand (e.g., Google/Chrome)
-        let pathComponents = (path as NSString).pathComponents
         if pathComponents.count >= 2 {
             let parent = pathComponents[pathComponents.count - 2]
             let lowerParent = parent.lowercased()
-            if !lowerParent.contains("application support") &&
-               !lowerParent.contains("containers") &&
-               !lowerParent.contains("caches") &&
-               !lowerParent.contains("library") &&
-               !lowerParent.hasPrefix("~") {
+            if !genericNames.contains(lowerParent) && !lowerParent.hasPrefix("~") {
                 return "\(parent) \(identifier)"
             }
         }
@@ -1729,6 +1730,8 @@ nonisolated struct FileSystemScanner: Sendable {
                 accessDenied = accessDenied || sizeResult.accessDenied
                 guard sizeResult.bytes > 1_000_000 else { continue }
 
+                let dataPath = (fullPath as NSString).appendingPathComponent("Data")
+                let noteDesc = describeDirectoryContents(at: dataPath) ?? describeDirectoryContents(at: fullPath)
                 childItems.append(displayItem(
                     name: bundleID,
                     label: "\(basePath)/\(entry)",
@@ -1736,7 +1739,7 @@ nonisolated struct FileSystemScanner: Sendable {
                     color: .blue,
                     sizeBytes: sizeResult.bytes,
                     finderPath: fullPath,
-                    description: "App Container"
+                    description: noteDesc
                 ))
             }
         }

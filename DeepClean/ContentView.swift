@@ -196,14 +196,13 @@ struct ContentView: View {
                 Text("Cleaning…")
                     .font(.caption)
                     .foregroundColor(.secondary)
+            } else if viewModel.isLoadingDetails {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Scanning…")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             } else {
-                if viewModel.isLoadingDetails {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Scanning…")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
                 Button {
                     viewModel.performScan()
                 } label: {

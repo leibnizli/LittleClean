@@ -48,6 +48,7 @@
       }
     },
     "App Container" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
