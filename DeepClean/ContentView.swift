@@ -225,7 +225,6 @@ struct ContentView: View {
                 .tag(ScanMode.deepAnalysis)
         }
         .pickerStyle(.segmented)
-        .controlSize(.small)
         .disabled(viewModel.isScanning || viewModel.isLoadingDetails || viewModel.isCleaning)
         .help(
             viewModel.scanMode == .safeCleanup

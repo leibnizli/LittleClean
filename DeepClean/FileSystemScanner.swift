@@ -2428,25 +2428,13 @@ nonisolated struct FileSystemScanner: Sendable {
     // Enumerate every non-system entry (file or folder, hidden or visible) directly under the
     // home directory -- especially the dot-prefixed tool/data folders such as .ollama, .cargo,
     // .gradle. Display-only: each row reveals its location in Finder via the magnifying glass;
-    // nothing here is ever cleaned. Docker is added explicitly because its ~60GB VM disk lives
-    // under ~/Library/Containers (nested under Library, so a home-root scan would miss it).
+    // nothing here is ever cleaned.
     private func scanHomeDirectory() -> CategoryItem? {
         let home = NSHomeDirectory()
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(atPath: home) else { return nil }
 
         var childItems: [CategoryItem] = []
-
-        // Docker's bulk data is nested under ~/Library/Containers, not the home root, so the
-        // enumeration below can't see it. Surface it as a special entry when present.
-        let dockerPath = (home as NSString).appendingPathComponent("Library/Containers/com.docker.docker")
-        var dockerIsDir: ObjCBool = false
-        if fm.fileExists(atPath: dockerPath, isDirectory: &dockerIsDir), dockerIsDir.boolValue {
-            let bytes = calculateDirectorySize(at: dockerPath, isDirectory: true)
-            if bytes > 0 {
-                childItems.append(displayItem(name: "Docker", label: "Docker", icon: "cube.fill", color: .blue, sizeBytes: bytes, finderPath: dockerPath, description: "Docker Data"))
-            }
-        }
 
         for entry in entries {
             let lowerEntry = entry.lowercased()

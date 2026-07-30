@@ -47,17 +47,6 @@
         }
       }
     },
-    "App Container" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "应用容器"
-          }
-        }
-      }
-    },
     "App Data" : {
       "localizations" : {
         "zh-Hans" : {
@@ -78,30 +67,18 @@
         }
       }
     },
-    "Browser Bridge" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "浏览器桥接"
-          }
-        }
-      }
-    },
-    "Cache" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "缓存"
-          }
-        }
-      }
-    },
     "Cancel" : {
 
+    },
+    "Choose carefully" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "谨慎勾选"
+          }
+        }
+      }
     },
     "Clean" : {
       "localizations" : {
@@ -146,17 +123,6 @@
     "Continue" : {
 
     },
-    "Crash Reports" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "崩溃报告"
-          }
-        }
-      }
-    },
     "Deep Analysis" : {
       "localizations" : {
         "zh-Hans" : {
@@ -186,19 +152,6 @@
           }
         }
       }
-    },
-    "Choose carefully" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "谨慎勾选"
-          }
-        }
-      }
-    },
-    "Docker Data" : {
-
     },
     "Empty" : {
       "localizations" : {
@@ -240,45 +193,12 @@
         }
       }
     },
-    "Installed App Containers" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已安装应用容器"
-          }
-        }
-      }
-    },
     "iOS Simulator Caches" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "iOS 模拟器缓存"
-          }
-        }
-      }
-    },
-    "Keys & Licenses" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "密钥与许可"
-          }
-        }
-      }
-    },
-    "Logs" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "日志"
           }
         }
       }
@@ -298,17 +218,6 @@
     },
     "Missing Runtime" : {
 
-    },
-    "Mixed Data" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "混合数据"
-          }
-        }
-      }
     },
     "Mode" : {
 
@@ -439,17 +348,6 @@
         }
       }
     },
-    "Scanning Home…" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在扫描个人目录…"
-          }
-        }
-      }
-    },
     "Scanning…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -476,17 +374,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已选 %@"
-          }
-        }
-      }
-    },
-    "Settings" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "配置"
           }
         }
       }
@@ -521,41 +408,8 @@
         }
       }
     },
-    "Telemetry" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "遥测数据"
-          }
-        }
-      }
-    },
     "Unavailable" : {
 
-    },
-    "Updater" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "更新程序"
-          }
-        }
-      }
-    },
-    "User Data" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用户数据"
-          }
-        }
-      }
     },
     "Website" : {
       "localizations" : {
