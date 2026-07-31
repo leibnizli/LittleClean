@@ -4,7 +4,7 @@
 
 DeepClean is a powerful and intelligent macOS cleaner and developer tool manager. It helps you reclaim valuable disk space by safely removing caches, logs, and leftovers, while also providing deep visibility into installed development tools and environments.
 
-<img width="832" height="715" alt="Image" src="https://github.com/user-attachments/assets/963cfb51-f571-4223-bb3c-33fe8f35ae72" />
+<img width="832" height="629" alt="Image" src="https://github.com/user-attachments/assets/1875d06d-943b-42b9-b122-a0f69ac11488" />
 
 ## Installation
 
