@@ -11,14 +11,14 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		84AB243230178C1F00782FA0 /* DeepClean.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DeepClean.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		84AB243230178C1F00782FA0 /* LittleClean.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LittleClean.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		84D15170301A0B1200CB98EE /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		84AB243430178C1F00782FA0 /* DeepClean */ = {
+		84AB243430178C1F00782FA0 /* LittleClean */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = DeepClean;
+			path = LittleClean;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -38,7 +38,7 @@
 			isa = PBXGroup;
 			children = (
 				84D15170301A0B1200CB98EE /* Localizable.xcstrings */,
-				84AB243430178C1F00782FA0 /* DeepClean */,
+				84AB243430178C1F00782FA0 /* LittleClean */,
 				84AB243330178C1F00782FA0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -46,7 +46,7 @@
 		84AB243330178C1F00782FA0 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				84AB243230178C1F00782FA0 /* DeepClean.app */,
+				84AB243230178C1F00782FA0 /* LittleClean.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -54,9 +54,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		84AB243130178C1F00782FA0 /* DeepClean */ = {
+		84AB243130178C1F00782FA0 /* LittleClean */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 84AB243D30178C2000782FA0 /* Build configuration list for PBXNativeTarget "DeepClean" */;
+			buildConfigurationList = 84AB243D30178C2000782FA0 /* Build configuration list for PBXNativeTarget "LittleClean" */;
 			buildPhases = (
 				84AB242E30178C1F00782FA0 /* Sources */,
 				84AB242F30178C1F00782FA0 /* Frameworks */,
@@ -67,13 +67,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				84AB243430178C1F00782FA0 /* DeepClean */,
+				84AB243430178C1F00782FA0 /* LittleClean */,
 			);
-			name = DeepClean;
+			name = LittleClean;
 			packageProductDependencies = (
 			);
-			productName = DeepClean;
-			productReference = 84AB243230178C1F00782FA0 /* DeepClean.app */;
+			productName = LittleClean;
+			productReference = 84AB243230178C1F00782FA0 /* LittleClean.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -91,7 +91,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 84AB242D30178C1F00782FA0 /* Build configuration list for PBXProject "DeepClean" */;
+			buildConfigurationList = 84AB242D30178C1F00782FA0 /* Build configuration list for PBXProject "LittleClean" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -106,7 +106,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				84AB243130178C1F00782FA0 /* DeepClean */,
+				84AB243130178C1F00782FA0 /* LittleClean */,
 			);
 		};
 /* End PBXProject section */
@@ -276,7 +276,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.2;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.arayofsunshine.DeepClean;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.arayofsunshine.LittleClean;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -309,7 +309,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.2;
-				PRODUCT_BUNDLE_IDENTIFIER = dev.arayofsunshine.DeepClean;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.arayofsunshine.LittleClean;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -324,7 +324,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		84AB242D30178C1F00782FA0 /* Build configuration list for PBXProject "DeepClean" */ = {
+		84AB242D30178C1F00782FA0 /* Build configuration list for PBXProject "LittleClean" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				84AB243B30178C2000782FA0 /* Debug */,
@@ -333,7 +333,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		84AB243D30178C2000782FA0 /* Build configuration list for PBXNativeTarget "DeepClean" */ = {
+		84AB243D30178C2000782FA0 /* Build configuration list for PBXNativeTarget "LittleClean" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				84AB243E30178C2000782FA0 /* Debug */,

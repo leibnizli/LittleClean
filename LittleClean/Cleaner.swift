@@ -61,6 +61,9 @@ nonisolated struct Cleaner: Sendable {
                     do {
                         try fileManager.removeItem(atPath: fullPath)
                     } catch {
+                        if isPermissionError(error) && removePathWithAdminPrivileges(path: fullPath) {
+                            continue
+                        }
                         recordFailure(error, path: fullPath)
                     }
                 }
@@ -70,6 +73,9 @@ nonisolated struct Cleaner: Sendable {
             do {
                 try FileManager.default.removeItem(atPath: treePath)
             } catch {
+                if isPermissionError(error) && removePathWithAdminPrivileges(path: treePath) {
+                    break
+                }
                 recordFailure(error, path: treePath)
             }
         case .deletePaths(let paths):
@@ -87,6 +93,9 @@ nonisolated struct Cleaner: Sendable {
                 do {
                     try fileManager.removeItem(atPath: path)
                 } catch {
+                    if isPermissionError(error) && removePathWithAdminPrivileges(path: path) {
+                        continue
+                    }
                     recordFailure(error, path: path)
                     // Do not remove user data when the application bundle itself could
                     // not be removed. This avoids resetting an app that remains installed.
@@ -113,6 +122,9 @@ nonisolated struct Cleaner: Sendable {
                         resultingItemURL: nil
                     )
                 } catch {
+                    if isPermissionError(error) && trashPathWithAdminPrivileges(path: path) {
+                        continue
+                    }
                     recordFailure(error, path: path)
                     // Keep the installed app and its data together when the primary
                     // bundle could not be moved to Trash.
@@ -225,6 +237,40 @@ nonisolated struct Cleaner: Sendable {
             return false
         }
         return platform.uint32Value != 0
+    }
+
+    private func isPermissionError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain && nsError.code == CocoaError.fileWriteNoPermission.rawValue {
+            return true
+        }
+        if nsError.domain == NSPOSIXErrorDomain && (nsError.code == Int(EACCES) || nsError.code == Int(EPERM)) {
+            return true
+        }
+        return false
+    }
+
+    private func removePathWithAdminPrivileges(path: String) -> Bool {
+        let script = "do shell script \"rm -rf \" & quoted form of \"\(path)\" with administrator privileges"
+        var errorDict: NSDictionary?
+        if let appleScript = NSAppleScript(source: script) {
+            appleScript.executeAndReturnError(&errorDict)
+            return errorDict == nil
+        }
+        return false
+    }
+
+    private func trashPathWithAdminPrivileges(path: String) -> Bool {
+        let trashPath = ("~/.Trash" as NSString).expandingTildeInPath
+        let script = """
+        do shell script "basename=$(basename " & quoted form of "\(path)" & "); dest=\\"\(trashPath)/$basename\\"; if [ -e \\"$dest\\" ]; then dest=\\"\(trashPath)/$(date +%s)-$basename\\"; fi; mv -f " & quoted form of "\(path)" & " \\"$dest\\"" with administrator privileges
+        """
+        var errorDict: NSDictionary?
+        if let appleScript = NSAppleScript(source: script) {
+            appleScript.executeAndReturnError(&errorDict)
+            return errorDict == nil
+        }
+        return false
     }
 
     private func rebuildRemeasuringCleanedLeaves(

@@ -1,21 +1,21 @@
-# DeepClean
+# LittleClean
 
 [中文文档](README_zh.md) | English
 
-DeepClean is a powerful and intelligent macOS cleaner and developer tool manager. It helps you reclaim valuable disk space by safely removing caches, logs, and leftovers, while also providing deep visibility into installed development tools and environments.
+LittleClean is a powerful and intelligent macOS cleaner and developer tool manager. It helps you reclaim valuable disk space by safely removing caches, logs, and leftovers, while also providing deep visibility into installed development tools and environments.
 
 <img width="832" height="629" alt="Image" src="https://github.com/user-attachments/assets/1875d06d-943b-42b9-b122-a0f69ac11488" />
 
 ## Installation
 
-You can download the latest pre-compiled version from the [Releases](https://github.com/leibnizli/DeepClean/releases) page. (Requires macOS 14 or later)
+You can download the latest pre-compiled version from the [Releases](https://github.com/leibnizli/LittleClean/releases) page. (Requires macOS 14 or later)
 
 Alternatively, you can clone the repository and build via Xcode.
 
 ## Features
 
 ### 🧹 Smart System Cleaning
-DeepClean categorizes and safely cleans up unnecessary files occupying your disk:
+LittleClean categorizes and safely cleans up unnecessary files occupying your disk:
 - **System Trash & Logs:** Empty the trash bin and clear system logs.
 - **App Caches:** Clear `~/Library/Caches` to free up space.
 - **Saved App State:** Remove saved application states for a fresh start.

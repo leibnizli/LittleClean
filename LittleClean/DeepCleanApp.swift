@@ -1,6 +1,6 @@
 //
-//  DeepCleanApp.swift
-//  DeepClean
+//  LittleCleanApp.swift
+//  LittleClean
 //
 //  Created by admin on 2026/7/27.
 //
@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct DeepCleanApp: App {
+struct LittleCleanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {

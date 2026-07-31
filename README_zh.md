@@ -1,21 +1,21 @@
-# DeepClean
+# LittleClean
 
 [English](README.md) | 中文文档
 
-DeepClean 是一款强大而智能的 macOS 系统清理及开发者工具管理软件。它能帮助您安全地清理缓存、日志和卸载残留，释放宝贵的磁盘空间，同时提供对已安装的开发环境及全局包的深度透视功能。
+LittleClean 是一款强大而智能的 macOS 系统清理及开发者工具管理软件。它能帮助您安全地清理缓存、日志和卸载残留，释放宝贵的磁盘空间，同时提供对已安装的开发环境及全局包的深度透视功能。
 
 <img width="832" height="629" alt="Image" src="https://github.com/user-attachments/assets/1875d06d-943b-42b9-b122-a0f69ac11488" />
 
 ## 安装与运行
 
-您可以从 [Releases](https://github.com/leibnizli/DeepClean/releases) 页面下载最新编译好的版本。（最低支持 macOS 14）
+您可以从 [Releases](https://github.com/leibnizli/LittleClean/releases) 页面下载最新编译好的版本。（最低支持 macOS 14）
 
 或者，您也可以克隆仓库后使用 Xcode 编译并运行。
 
 ## 功能特性
 
 ### 🧹 智能系统清理
-DeepClean 能够对占据磁盘空间的无用文件进行分类并安全清理：
+LittleClean 能够对占据磁盘空间的无用文件进行分类并安全清理：
 - **系统废纸篓与日志:** 清空废纸篓并清理系统日志。
 - **应用缓存:** 清理 `~/Library/Caches` 以释放空间。
 - **应用保存状态:** 移除应用的 Saved Application State。

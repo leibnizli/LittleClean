@@ -445,7 +445,7 @@ final class ContentViewModel: ObservableObject {
         }
         var message = displayedFailures.joined(separator: "\n\n")
         if requiresAccess {
-            let guidance = String(localized: "macOS blocked access to another app's protected container. Grant DeepClean Full Disk Access, then quit and reopen the app.")
+            let guidance = String(localized: "macOS blocked access to another app's protected container. Grant LittleClean Full Disk Access, then quit and reopen the app.")
             message = "\(guidance)\n\n\(message)"
         }
         if failures.count > displayedFailures.count {

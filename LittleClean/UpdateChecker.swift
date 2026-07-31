@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated struct UpdateChecker: Sendable {
-    private let releasesURL = URL(string: "https://api.github.com/repos/leibnizli/DeepClean/releases/latest")!
+    private let releasesURL = URL(string: "https://api.github.com/repos/leibnizli/LittleClean/releases/latest")!
 
     func checkForNewVersion(completion: @escaping (String) -> Void) {
         URLSession.shared.dataTask(with: releasesURL) { data, _, error in

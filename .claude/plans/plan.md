@@ -64,7 +64,7 @@ All nodes: `cleanType = .none`, `isDisplayOnly = true`, `sizeBytes = 0`.
   Prevents duplicate/stale appends across rescans.
 
 ## 5. Build & verify
-`xcodebuild -project DeepClean.xcodeproj -scheme DeepClean build`.
+`xcodebuild -project LittleClean.xcodeproj -scheme LittleClean build`.
 
 ## Out of scope
 - Sizes/versions (user chose name-only).

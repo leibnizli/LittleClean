@@ -224,12 +224,12 @@
         }
       }
     },
-    "DeepClean refuses to remove itself or a protected system application." : {
+    "LittleClean refuses to remove itself or a protected system application." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "DeepClean 不会删除自身或受保护的系统应用。"
+            "value" : "LittleClean 不会删除自身或受保护的系统应用。"
           }
         }
       }
@@ -347,12 +347,12 @@
     "Lower-risk paths that can be cleaned." : {
 
     },
-    "macOS blocked access to another app's protected container. Grant DeepClean Full Disk Access, then quit and reopen the app." : {
+    "macOS blocked access to another app's protected container. Grant LittleClean Full Disk Access, then quit and reopen the app." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "macOS 阻止了对其他应用受保护容器的访问。请授予 DeepClean 完全磁盘访问权限，然后退出并重新打开应用。"
+            "value" : "macOS 阻止了对其他应用受保护容器的访问。请授予 LittleClean 完全磁盘访问权限，然后退出并重新打开应用。"
           }
         }
       }
