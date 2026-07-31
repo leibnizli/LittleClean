@@ -1,10 +1,15 @@
 import SwiftUI
 
 nonisolated enum ScanMode: String, CaseIterable, Hashable, Identifiable, Sendable {
+    case uninstallApps
     case safeCleanup
     case deepAnalysis
 
     var id: String { rawValue }
+
+    var allowsCleaning: Bool {
+        self != .deepAnalysis
+    }
 }
 
 nonisolated enum CleanType: Equatable, Sendable {
@@ -12,6 +17,7 @@ nonisolated enum CleanType: Equatable, Sendable {
     case deleteDirectory        // clear contents, keep the folder (caches)
     case deleteDirectoryTree    // remove the folder entirely (leftovers)
     case deletePaths([String])
+    case trashPaths([String])   // move an app and its related files to Trash
     case runCommand(executable: String, args: [String])
 }
 

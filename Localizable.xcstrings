@@ -4,12 +4,32 @@
     "" : {
 
     },
+    "…and %lld more" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "……以及另外 %lld 个"
+          }
+        }
+      }
+    },
     "%@ · %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ · %2$@"
+          }
+        }
+      }
+    },
+    "%@ · App + %lld related items" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ · 应用及 %2$lld 个关联项目"
           }
         }
       }
@@ -37,6 +57,16 @@
     "About Deep Analysis" : {
 
     },
+    "Analyzing apps…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在分析应用…"
+          }
+        }
+      }
+    },
     "App Caches" : {
       "localizations" : {
         "zh-Hans" : {
@@ -57,6 +87,16 @@
         }
       }
     },
+    "App Container" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用容器"
+          }
+        }
+      }
+    },
     "App Data" : {
       "localizations" : {
         "zh-Hans" : {
@@ -73,6 +113,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "应用残留"
+          }
+        }
+      }
+    },
+    "Application Bundle" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用本体"
+          }
+        }
+      }
+    },
+    "Application Bundle · Managed by Setapp" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用本体 · 由 Setapp 管理"
+          }
+        }
+      }
+    },
+    "Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缓存"
+          }
+        }
+      }
+    },
+    "Calculating sizes…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在计算大小…"
           }
         }
       }
@@ -143,6 +224,16 @@
         }
       }
     },
+    "DeepClean refuses to remove itself or a protected system application." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DeepClean 不会删除自身或受保护的系统应用。"
+          }
+        }
+      }
+    },
     "Deletion Failed" : {
       "localizations" : {
         "zh-Hans" : {
@@ -193,12 +284,62 @@
         }
       }
     },
+    "Homebrew Cask Installation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Homebrew Cask 安装目录"
+          }
+        }
+      }
+    },
+    "Include this related file in the uninstall plan." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在卸载计划中包含此关联文件。"
+          }
+        }
+      }
+    },
+    "Internet Plug-In" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Internet 插件"
+          }
+        }
+      }
+    },
     "iOS Simulator Caches" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "iOS 模拟器缓存"
+          }
+        }
+      }
+    },
+    "Launch Agent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动代理"
+          }
+        }
+      }
+    },
+    "Log" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日志"
           }
         }
       }
@@ -222,12 +363,32 @@
     "Mode" : {
 
     },
+    "Moves each app and confidently matched user data to Trash." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将应用及已可靠匹配的用户数据移到废纸篓。"
+          }
+        }
+      }
+    },
     "New Version Available" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "有新版本可用"
+          }
+        }
+      }
+    },
+    "No Bundle Identifier" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无 Bundle 标识符"
           }
         }
       }
@@ -285,6 +446,48 @@
         }
       }
     },
+    "Permanently deletes each app and confidently matched user data." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "永久删除应用及已可靠匹配的用户数据。"
+          }
+        }
+      }
+    },
+    "Preferences" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偏好设置"
+          }
+        }
+      }
+    },
+    "Quit these apps first. Some containers may require Full Disk Access. Items remain recoverable until Trash is emptied." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先退出这些应用。部分容器可能需要完全磁盘访问权限。清空废纸篓前仍可恢复这些项目。"
+          }
+        }
+      }
+    },
+    "Quit these apps first. Some containers may require Full Disk Access. This action cannot be undone." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先退出这些应用。部分容器可能需要完全磁盘访问权限。此操作无法撤销。"
+          }
+        }
+      }
+    },
     "Read Only" : {
 
     },
@@ -304,6 +507,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "安全清理范围外的只读内容。"
+          }
+        }
+      }
+    },
+    "Related App Data" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关联应用数据"
+          }
+        }
+      }
+    },
+    "Remove installed apps and their matching user data." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除已安装应用及与其匹配的用户数据。"
           }
         }
       }
@@ -378,6 +601,16 @@
         }
       }
     },
+    "Service" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务"
+          }
+        }
+      }
+    },
     "Size" : {
       "localizations" : {
         "zh-Hans" : {
@@ -408,8 +641,79 @@
         }
       }
     },
+    "The application bundle is required." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "必须包含应用本体。"
+          }
+        }
+      }
+    },
+    "The application is running. Quit it completely, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该应用正在运行。请完全退出后重试。"
+          }
+        }
+      }
+    },
+    "The following apps and their matching files will be moved to Trash:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以下应用及其匹配文件将被移到废纸篓："
+          }
+        }
+      }
+    },
+    "The following apps and their matching files will be permanently deleted:" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以下应用及其匹配文件将被永久删除："
+          }
+        }
+      }
+    },
     "Unavailable" : {
 
+    },
+    "Uninstall" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载"
+          }
+        }
+      }
+    },
+    "Uninstall Apps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载应用"
+          }
+        }
+      }
+    },
+    "Uninstall Selected Apps?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载所选应用？"
+          }
+        }
+      }
     },
     "Website" : {
       "localizations" : {

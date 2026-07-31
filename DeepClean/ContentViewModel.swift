@@ -24,7 +24,7 @@ final class ContentViewModel: ObservableObject {
     ]
     @Published var selectedIDs: Set<UUID> = []
     @Published var searchText = ""
-    @Published var scanMode: ScanMode = .safeCleanup
+    @Published var scanMode: ScanMode = .uninstallApps
 
     private let scanner: FileSystemScanner
     private let cleaner: Cleaner
@@ -52,10 +52,28 @@ final class ContentViewModel: ObservableObject {
         collectCleanableSelected(from: categories).reduce(0) { $0 + $1.sizeBytes }
     }
 
+    var selectedItemNames: [String] {
+        categories
+            .filter { item in
+                if item.isAtomicSelection {
+                    return uninstallDetailIDs(item).contains { selectedIDs.contains($0) }
+                }
+                return selectedIDs.contains(item.id)
+            }
+            .map(\.name)
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
     var displayedCategories: [CategoryItem] {
-        let base = searchText.trimmingCharacters(in: .whitespaces).isEmpty
-            ? categories
-            : flatFilteredLeaves(categories, query: searchText)
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespaces)
+        let base: [CategoryItem]
+        if trimmedSearch.isEmpty {
+            base = categories
+        } else if scanMode == .uninstallApps {
+            base = filterUninstallApplications(categories, query: trimmedSearch)
+        } else {
+            base = flatFilteredLeaves(categories, query: trimmedSearch)
+        }
         var result = base.sorted(using: sortOrder)
         for index in result.indices {
             result[index].children?.sort(using: sortOrder)
@@ -107,6 +125,8 @@ final class ContentViewModel: ObservableObject {
                 self.isScanning = false
                 if mode == .deepAnalysis {
                     self.loadDetails(for: token)
+                } else if mode == .uninstallApps {
+                    self.loadUninstallEnrichment(for: token)
                 } else {
                     self.cacheCurrentScan(for: mode)
                 }
@@ -123,14 +143,18 @@ final class ContentViewModel: ObservableObject {
     }
 
     func performCleanSelected() {
-        guard scanMode == .safeCleanup else { return }
+        guard scanMode.allowsCleaning else { return }
         let items = collectCleanableSelected(from: categories)
         guard !items.isEmpty else { return }
         clean(items, clearingAllSelection: true)
     }
 
     func cleanSingleItem(_ item: CategoryItem) {
-        guard scanMode == .safeCleanup else { return }
+        guard scanMode.allowsCleaning else { return }
+        if item.isAtomicSelection {
+            clean([item], clearingAllSelection: false)
+            return
+        }
         var items: [CategoryItem] = []
         func collectLeaves(_ node: CategoryItem) {
             if let children = node.children, !children.isEmpty {
@@ -145,7 +169,8 @@ final class ContentViewModel: ObservableObject {
     }
 
     func isCleanable(_ item: CategoryItem) -> Bool {
-        guard scanMode == .safeCleanup else { return false }
+        guard scanMode.allowsCleaning else { return false }
+        if item.isSelectionDetail { return true }
         if item.rule.cleanType != .none { return true }
         if let children = item.children {
             return children.contains { isCleanable($0) }
@@ -154,6 +179,14 @@ final class ContentViewModel: ObservableObject {
     }
 
     func selectionState(for item: CategoryItem) -> SelectionState {
+        if item.isAtomicSelection {
+            let details = uninstallDetailIDs(item)
+            guard !details.isEmpty else { return .unchecked }
+            let selectedCount = details.filter { selectedIDs.contains($0) }.count
+            if selectedCount == 0 { return .unchecked }
+            if selectedCount == details.count { return .checked }
+            return .mixed
+        }
         if let children = item.children, !children.isEmpty {
             let leaves = leafIDs(item)
             guard !leaves.isEmpty else { return .unchecked }
@@ -166,6 +199,33 @@ final class ContentViewModel: ObservableObject {
     }
 
     func toggleSelection(_ item: CategoryItem) {
+        if item.isAtomicSelection {
+            let details = Set(uninstallDetailIDs(item))
+            guard !details.isEmpty else { return }
+            if details.isSubset(of: selectedIDs) {
+                selectedIDs.subtract(details)
+            } else {
+                selectedIDs.formUnion(details)
+            }
+            return
+        }
+        if item.isSelectionDetail {
+            guard !item.isRequiredSelectionDetail else { return }
+            if selectedIDs.contains(item.id) {
+                selectedIDs.remove(item.id)
+            } else {
+                selectedIDs.insert(item.id)
+                if let parent = categories.first(where: {
+                    ($0.children ?? []).contains { $0.id == item.id }
+                }),
+                   let requiredID = parent.children?.first(where: {
+                       $0.isRequiredSelectionDetail
+                   })?.id {
+                    selectedIDs.insert(requiredID)
+                }
+            }
+            return
+        }
         if let children = item.children, !children.isEmpty {
             let leaves = leafIDs(item)
             if leaves.isSubset(of: selectedIDs) {
@@ -263,10 +323,83 @@ final class ContentViewModel: ObservableObject {
         }
     }
 
+    private func loadUninstallEnrichment(for scanToken: Int) {
+        detailsLoadToken += 1
+        let token = detailsLoadToken
+        let snapshot = categories
+        let scanner = scanner
+        isLoadingDetails = true
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let enrichment = scanner.enrichUninstallApplications(snapshot)
+            DispatchQueue.main.async {
+                guard let self,
+                      token == self.detailsLoadToken,
+                      scanToken == self.scanToken,
+                      self.scanMode == .uninstallApps,
+                      !self.isScanning else { return }
+                let selectedPaths = self.selectedUninstallDetailPaths()
+                self.categories = enrichment.items
+                self.needsFullDiskAccess = self.needsFullDiskAccess || enrichment.accessDenied
+                self.restoreUninstallSelection(matching: selectedPaths)
+            }
+
+            for item in enrichment.items {
+                let measured = scanner.measureUninstallApplication(item)
+                DispatchQueue.main.async {
+                    guard let self,
+                          token == self.detailsLoadToken,
+                          scanToken == self.scanToken,
+                          self.scanMode == .uninstallApps,
+                          !self.isScanning else { return }
+                    let selectedPaths = self.selectedUninstallDetailPaths()
+                    if let index = self.categories.firstIndex(where: {
+                        $0.pathDescription == measured.pathDescription
+                    }) {
+                        self.categories[index] = measured
+                        self.restoreUninstallSelection(matching: selectedPaths)
+                    }
+                }
+            }
+
+            DispatchQueue.main.async {
+                guard let self,
+                      token == self.detailsLoadToken,
+                      scanToken == self.scanToken,
+                      self.scanMode == .uninstallApps,
+                      !self.isScanning else { return }
+                self.isLoadingDetails = false
+                self.cacheCurrentScan(for: .uninstallApps)
+            }
+        }
+    }
+
+    private func selectedUninstallDetailPaths() -> Set<String> {
+        Set(
+            categories.flatMap { item in
+                (item.children ?? [])
+                    .filter { selectedIDs.contains($0.id) }
+                    .map(\.pathDescription)
+            }
+        )
+    }
+
+    private func restoreUninstallSelection(matching paths: Set<String>) {
+        guard !paths.isEmpty else { return }
+        selectedIDs = Set(
+            categories.flatMap { item in
+                (item.children ?? [])
+                    .filter { paths.contains($0.pathDescription) }
+                    .map(\.id)
+            }
+        )
+    }
+
     private func clean(_ items: [CategoryItem], clearingAllSelection: Bool) {
         let cleanedIDs = Set(items.map { $0.id })
         let snapshot = categories
         let cleaner = cleaner
+        let cleaningMode = scanMode
         isCleaning = true
         cleaningErrorMessage = nil
 
@@ -276,7 +409,7 @@ final class ContentViewModel: ObservableObject {
                 guard let self else { return }
                 self.categories = result.categories
                 self.isCleaning = false
-                if items.contains(where: { self.isProtectedContainerPath($0.pathDescription) }) {
+                if result.failures.contains(where: self.requiresFullDiskAccess) {
                     self.needsFullDiskAccess = result.failures.contains(where: self.requiresFullDiskAccess)
                 }
                 if !result.failures.isEmpty {
@@ -288,8 +421,12 @@ final class ContentViewModel: ObservableObject {
                     self.selectedIDs.subtract(cleanedIDs)
                 }
                 self.scanCache.removeAll()
-                self.cacheCurrentScan(for: self.scanMode)
                 self.loadRealDiskSpace()
+                if cleaningMode == .uninstallApps, self.scanMode == cleaningMode {
+                    self.performScan()
+                } else {
+                    self.cacheCurrentScan(for: self.scanMode)
+                }
             }
         }
     }
@@ -354,10 +491,43 @@ final class ContentViewModel: ObservableObject {
         return result
     }
 
+    private func filterUninstallApplications(
+        _ items: [CategoryItem],
+        query: String
+    ) -> [CategoryItem] {
+        let loweredQuery = query.lowercased()
+        return items.filter { item in
+            item.name.lowercased().contains(loweredQuery)
+                || item.pathDescription.lowercased().contains(loweredQuery)
+                || (item.children ?? []).contains {
+                    $0.pathDescription.lowercased().contains(loweredQuery)
+                }
+        }
+    }
+
     private func collectCleanableSelected(from items: [CategoryItem]) -> [CategoryItem] {
         var result: [CategoryItem] = []
         for item in items {
-            if let children = item.children, !children.isEmpty {
+            if item.isAtomicSelection {
+                let selectedChildren = (item.children ?? []).filter {
+                    $0.isSelectionDetail && selectedIDs.contains($0.id)
+                }
+                guard selectedChildren.contains(where: \.isRequiredSelectionDetail) else {
+                    continue
+                }
+                var plannedItem = item
+                plannedItem.children = selectedChildren
+                plannedItem.sizeBytes = selectedChildren.reduce(Int64(0)) {
+                    $0 + $1.sizeBytes
+                }
+                plannedItem.sizeString = plannedItem.sizeBytes > 0
+                    ? formatBytes(plannedItem.sizeBytes)
+                    : ""
+                plannedItem.rule.cleanType = .trashPaths(
+                    selectedChildren.map(\.pathDescription)
+                )
+                result.append(plannedItem)
+            } else if let children = item.children, !children.isEmpty {
                 result.append(contentsOf: collectCleanableSelected(from: children))
             } else if item.rule.cleanType != .none && selectedIDs.contains(item.id) {
                 result.append(item)
@@ -367,6 +537,9 @@ final class ContentViewModel: ObservableObject {
     }
 
     private func leafIDs(_ item: CategoryItem) -> Set<UUID> {
+        if item.isAtomicSelection {
+            return Set(uninstallDetailIDs(item))
+        }
         var ids = Set<UUID>()
         if let children = item.children, !children.isEmpty {
             for child in children {
@@ -376,6 +549,12 @@ final class ContentViewModel: ObservableObject {
             ids.insert(item.id)
         }
         return ids
+    }
+
+    private func uninstallDetailIDs(_ item: CategoryItem) -> [UUID] {
+        (item.children ?? [])
+            .filter(\.isSelectionDetail)
+            .map(\.id)
     }
 
     private func loadRealDiskSpace() {

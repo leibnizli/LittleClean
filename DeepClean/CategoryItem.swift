@@ -10,7 +10,7 @@ nonisolated struct CategoryItem: Identifiable, @unchecked Sendable {
     let iconColor: Color
     var sizeBytes: Int64
     var sizeString: String
-    let rule: CleanRule
+    var rule: CleanRule
     var children: [CategoryItem]? = nil
     // Read-only informational node: no checkbox, never cleaned (Finder reveal via finderPath)
     var isSelected: Bool = true
@@ -21,6 +21,12 @@ nonisolated struct CategoryItem: Identifiable, @unchecked Sendable {
     var displayPath: String? = nil
     // Short description shown in the "Note" column (what this dir/tool is)
     var description: LocalizedStringKey? = nil
+    // Select this node as one operation even when it has informational children.
+    var isAtomicSelection: Bool = false
+    // A reviewable path that contributes to its atomic parent's uninstall plan.
+    var isSelectionDetail: Bool = false
+    // The application bundle itself cannot be excluded from an uninstall plan.
+    var isRequiredSelectionDetail: Bool = false
 }
 
 nonisolated enum SelectionState {

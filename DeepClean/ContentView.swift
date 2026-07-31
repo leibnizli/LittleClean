@@ -7,6 +7,7 @@ struct ContentView: View {
     @AppStorage("hasSeenDeepAnalysisIntroduction")
     private var hasSeenDeepAnalysisIntroduction = false
     @State private var isShowingDeepAnalysisIntroduction = false
+    @State private var isShowingUninstallConfirmation = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,7 +57,44 @@ struct ContentView: View {
         Table(viewModel.displayedCategories, children: \.children, sortOrder: $viewModel.sortOrder) {
             TableColumn("Path", value: \.pathDescription) { item in
                 HStack(alignment: .center, spacing: 6) {
-                    if let children = item.children, !children.isEmpty {
+                    if item.isAtomicSelection {
+                        let state = viewModel.selectionState(for: item)
+                        let enabled = viewModel.isCleanable(item)
+                        Button {
+                            viewModel.toggleSelection(item)
+                        } label: {
+                            Image(systemName: state.symbolName)
+                                .foregroundColor(
+                                    enabled ? Color(NSColor.controlAccentColor) : .secondary
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!enabled)
+
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: item.pathDescription))
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 20, height: 20)
+                    } else if item.isSelectionDetail {
+                        let state = viewModel.selectionState(for: item)
+                        Button {
+                            viewModel.toggleSelection(item)
+                        } label: {
+                            Image(systemName: state.symbolName)
+                                .foregroundColor(Color(NSColor.controlAccentColor))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(item.isRequiredSelectionDetail)
+                        .help(
+                            item.isRequiredSelectionDetail
+                                ? Text("The application bundle is required.")
+                                : Text("Include this related file in the uninstall plan.")
+                        )
+
+                        Image(systemName: item.iconName)
+                            .foregroundColor(item.iconColor)
+                            .frame(width: 16)
+                    } else if let children = item.children, !children.isEmpty {
                         let hasToolIcon = NSImage(
                             systemSymbolName: item.iconName,
                             accessibilityDescription: nil
@@ -100,12 +138,21 @@ struct ContentView: View {
             .width(min: 100, ideal: 180, max: 320)
 
             TableColumn("Size", value: \.sizeBytes) { item in
-                Text(item.sizeString)
-                    .font(.system(size: 13, design: .rounded))
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .contextMenu { itemContextMenu(item) }
+                Group {
+                    if item.isAtomicSelection,
+                       item.sizeString.isEmpty,
+                       viewModel.isLoadingDetails {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Text(item.sizeString)
+                            .font(.system(size: 13, design: .rounded))
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .contextMenu { itemContextMenu(item) }
             }
             .width(min: 90, ideal: 110, max: 150)
 
@@ -199,7 +246,11 @@ struct ContentView: View {
             } else if viewModel.isLoadingDetails {
                 ProgressView()
                     .controlSize(.small)
-                Text("Scanning…")
+                Text(
+                    viewModel.scanMode == .uninstallApps
+                        ? "Analyzing apps…"
+                        : "Scanning…"
+                )
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
@@ -219,6 +270,8 @@ struct ContentView: View {
 
     private var scanModePicker: some View {
         Picker("Mode", selection: scanModeSelection) {
+            Text("Uninstall Apps")
+                .tag(ScanMode.uninstallApps)
             Text("Safe Cleanup")
                 .tag(ScanMode.safeCleanup)
             Text("Deep Analysis")
@@ -226,11 +279,7 @@ struct ContentView: View {
         }
         .pickerStyle(.segmented)
         .disabled(viewModel.isScanning || viewModel.isLoadingDetails || viewModel.isCleaning)
-        .help(
-            viewModel.scanMode == .safeCleanup
-                ? Text("Lower-risk paths that can be cleaned.")
-                : Text("Read-only content outside Safe Cleanup.")
-        )
+        .help(scanModeHelp)
         .alert(
             "About Deep Analysis",
             isPresented: $isShowingDeepAnalysisIntroduction
@@ -272,11 +321,57 @@ struct ContentView: View {
         )
     }
 
+    private var scanModeHelp: Text {
+        switch viewModel.scanMode {
+        case .uninstallApps:
+            Text("Remove installed apps and their matching user data.")
+        case .safeCleanup:
+            Text("Lower-risk paths that can be cleaned.")
+        case .deepAnalysis:
+            Text("Read-only content outside Safe Cleanup.")
+        }
+    }
+
     // MARK: - Bottom Action Bar
 
     private var bottomActionBar: some View {
         HStack(spacing: 14) {
-            if viewModel.scanMode == .safeCleanup {
+            if viewModel.scanMode == .uninstallApps {
+                Button {
+                    isShowingUninstallConfirmation = true
+                } label: {
+                    Text("Uninstall")
+                }
+                .disabled(
+                    viewModel.selectedIDs.isEmpty
+                        || viewModel.isScanning
+                        || viewModel.isLoadingDetails
+                        || viewModel.isCleaning
+                )
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .alert(
+                    "Uninstall Selected Apps?",
+                    isPresented: $isShowingUninstallConfirmation
+                ) {
+                    Button("Uninstall", role: .destructive) {
+                        viewModel.performCleanSelected()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(verbatim: uninstallConfirmationMessage)
+                }
+
+                if !viewModel.selectedIDs.isEmpty {
+                    Text("Selected \(formatBytes(viewModel.selectedTotalBytes))")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+
+                Text("Moves each app and confidently matched user data to Trash.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            } else if viewModel.scanMode == .safeCleanup {
                 Button {
                     viewModel.performCleanSelected()
                 } label: {
@@ -310,6 +405,28 @@ struct ContentView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
         .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private var uninstallConfirmationMessage: String {
+        let names = viewModel.selectedItemNames
+        let displayedNames = names.prefix(6).joined(separator: "\n")
+        let remainingCount = max(0, names.count - 6)
+        let remaining = remainingCount > 0
+            ? "\n" + String(localized: "…and \(remainingCount) more")
+            : ""
+        let heading = String(
+            localized: "The following apps and their matching files will be moved to Trash:"
+        )
+        let guidance = String(
+            localized: "Quit these apps first. Some containers may require Full Disk Access. Items remain recoverable until Trash is emptied."
+        )
+        return """
+        \(heading)
+
+        \(displayedNames)\(remaining)
+
+        \(guidance)
+        """
     }
 }
 

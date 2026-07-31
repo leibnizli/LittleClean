@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import Security
 
 nonisolated struct CleanFailure: Sendable {
     let path: String
@@ -72,11 +74,51 @@ nonisolated struct Cleaner: Sendable {
             }
         case .deletePaths(let paths):
             let fileManager = FileManager.default
-            for path in paths {
+            let appPaths = paths.filter {
+                URL(fileURLWithPath: $0).pathExtension.lowercased() == "app"
+            }
+            if let failure = applicationPreflightFailure(for: appPaths) {
+                return [failure]
+            }
+
+            let orderedPaths = appPaths + paths.filter { !appPaths.contains($0) }
+            for path in orderedPaths {
+                guard fileManager.fileExists(atPath: path) else { continue }
                 do {
                     try fileManager.removeItem(atPath: path)
                 } catch {
                     recordFailure(error, path: path)
+                    // Do not remove user data when the application bundle itself could
+                    // not be removed. This avoids resetting an app that remains installed.
+                    if appPaths.contains(path) {
+                        return failures
+                    }
+                }
+            }
+        case .trashPaths(let paths):
+            let fileManager = FileManager.default
+            let appPaths = paths.filter {
+                URL(fileURLWithPath: $0).pathExtension.lowercased() == "app"
+            }
+            if let failure = applicationPreflightFailure(for: appPaths) {
+                return [failure]
+            }
+
+            let orderedPaths = appPaths + paths.filter { !appPaths.contains($0) }
+            for path in orderedPaths {
+                guard fileManager.fileExists(atPath: path) else { continue }
+                do {
+                    try fileManager.trashItem(
+                        at: URL(fileURLWithPath: path),
+                        resultingItemURL: nil
+                    )
+                } catch {
+                    recordFailure(error, path: path)
+                    // Keep the installed app and its data together when the primary
+                    // bundle could not be moved to Trash.
+                    if appPaths.contains(path) {
+                        return failures
+                    }
                 }
             }
         case .runCommand(let executable, let args):
@@ -100,6 +142,89 @@ nonisolated struct Cleaner: Sendable {
         }
 
         return failures
+    }
+
+    private func applicationPreflightFailure(for appPaths: [String]) -> CleanFailure? {
+        for appPath in appPaths {
+            let appURL = URL(fileURLWithPath: appPath).standardizedFileURL
+            let resolvedURL = appURL.resolvingSymlinksInPath().standardizedFileURL
+            let resolvedPath = resolvedURL.path
+            let resourceValues = try? resolvedURL.resourceValues(forKeys: [
+                .isSystemImmutableKey,
+                .volumeIsReadOnlyKey
+            ])
+            let isCurrentApp = appURL.path == Bundle.main.bundleURL.standardizedFileURL.path
+            let isSystemApp = resolvedPath.hasPrefix("/System/")
+                || resolvedPath.hasPrefix("/System/Cryptexes/")
+                || resolvedPath.hasPrefix("/Library/Apple/")
+                || resourceValues?.isSystemImmutable == true
+                || resourceValues?.volumeIsReadOnly == true
+                || isApplePlatformSystemApplication(at: resolvedURL)
+            if isCurrentApp || isSystemApp {
+                return CleanFailure(
+                    path: appPath,
+                    domain: "DeepClean",
+                    code: 1,
+                    reason: String(
+                        localized: "DeepClean refuses to remove itself or a protected system application."
+                    )
+                )
+            }
+
+            if let bundleIdentifier = Bundle(url: appURL)?.bundleIdentifier,
+               !NSRunningApplication.runningApplications(
+                withBundleIdentifier: bundleIdentifier
+               ).isEmpty {
+                return CleanFailure(
+                    path: appPath,
+                    domain: "DeepClean",
+                    code: 2,
+                    reason: String(
+                        localized: "The application is running. Quit it completely, then try again."
+                    )
+                )
+            }
+        }
+        return nil
+    }
+
+    private func isApplePlatformSystemApplication(at appURL: URL) -> Bool {
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(
+            appURL as CFURL,
+            SecCSFlags(rawValue: 0),
+            &staticCode
+        ) == errSecSuccess,
+              let staticCode else {
+            return false
+        }
+
+        var appleAnchor: SecRequirement?
+        guard SecRequirementCreateWithString(
+            "anchor apple" as CFString,
+            SecCSFlags(rawValue: 0),
+            &appleAnchor
+        ) == errSecSuccess,
+              let appleAnchor,
+              SecStaticCodeCheckValidity(
+                staticCode,
+                SecCSFlags(rawValue: kSecCSCheckAllArchitectures),
+                appleAnchor
+              ) == errSecSuccess else {
+            return false
+        }
+
+        var signingInfo: CFDictionary?
+        guard SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &signingInfo
+        ) == errSecSuccess,
+              let info = signingInfo as? [String: Any],
+              let platform = info[kSecCodeInfoPlatformIdentifier as String] as? NSNumber else {
+            return false
+        }
+        return platform.uint32Value != 0
     }
 
     private func rebuildRemeasuringCleanedLeaves(

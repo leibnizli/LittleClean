@@ -1,4 +1,5 @@
 import AppKit
+import Security
 import SwiftUI
 
 private nonisolated func normalizeAppIdentifier(_ str: String) -> String {
@@ -7,6 +8,19 @@ private nonisolated func normalizeAppIdentifier(_ str: String) -> String {
         .replacingOccurrences(of: "_", with: "")
         .replacingOccurrences(of: " ", with: "")
         .replacingOccurrences(of: ".", with: "")
+}
+
+private nonisolated struct InstalledApplication: Sendable {
+    let name: String
+    let bundleIdentifier: String?
+    let path: String
+    let matchingNames: Set<String>
+    // Bundle IDs, signing IDs, and stripped application identifiers.
+    let relatedIdentifiers: Set<String>
+    // Exact entitlement group IDs only -- never used for fuzzy name matching.
+    let applicationGroups: Set<String>
+    let managedPaths: Set<String>
+    let installSource: String?
 }
 
 // A snapshot of what is currently installed, used to tell "still in use" from "leftover".
@@ -26,6 +40,10 @@ private nonisolated final class InstalledAppIndex: @unchecked Sendable {
         "/Applications",
         "/System/Applications",
         "/System/Library/CoreServices",
+        (NSHomeDirectory() as NSString).appendingPathComponent("Applications")
+    ]
+    private static let userApplicationRoots: [String] = [
+        "/Applications",
         (NSHomeDirectory() as NSString).appendingPathComponent("Applications")
     ]
 
@@ -50,6 +68,272 @@ private nonisolated final class InstalledAppIndex: @unchecked Sendable {
         lock.unlock()
 
         return identifiers
+    }
+
+    // User-facing uninstall targets only. System apps under /System are never listed.
+    // Apple apps the user installed into /Applications (Xcode, iWork, Final Cut, etc.)
+    // remain visible because they are legitimate uninstall targets.
+    func userInstalledApplications(includingAssociations: Bool = true) -> [InstalledApplication] {
+        let fileManager = FileManager.default
+        let currentAppPath = Bundle.main.bundleURL.standardizedFileURL.path
+        var seenPaths = Set<String>()
+        var applications: [InstalledApplication] = []
+
+        for root in Self.userApplicationRoots {
+            for bundleURL in Self.appBundles(in: root) {
+                let standardizedURL = bundleURL.standardizedFileURL
+                let path = standardizedURL.path
+                let resolvedPath = standardizedURL.resolvingSymlinksInPath().path
+                let resourceValues = try? standardizedURL.resourceValues(forKeys: [
+                    .isSystemImmutableKey,
+                    .volumeIsReadOnlyKey
+                ])
+                guard path != currentAppPath,
+                      !Self.isProtectedSystemApplicationPath(resolvedPath),
+                      resourceValues?.isSystemImmutable != true,
+                      resourceValues?.volumeIsReadOnly != true,
+                      !Self.isApplePlatformSystemApplication(at: standardizedURL),
+                      fileManager.isDeletableFile(atPath: path),
+                      seenPaths.insert(path).inserted else {
+                    continue
+                }
+
+                let infoPlistURL = bundleURL.appendingPathComponent("Contents/Info.plist")
+                let plist = (try? Data(contentsOf: infoPlistURL)).flatMap {
+                    try? PropertyListSerialization.propertyList(
+                        from: $0,
+                        options: [],
+                        format: nil
+                    ) as? [String: Any]
+                }
+                let bundleIdentifier = plist?["CFBundleIdentifier"] as? String
+                if Self.isBlockedSystemBundleIdentifier(bundleIdentifier) {
+                    continue
+                }
+                let finderName = (fileManager.displayName(atPath: path) as NSString)
+                    .deletingPathExtension
+                let diskName = bundleURL.deletingPathExtension().lastPathComponent
+                let displayName = (plist?["CFBundleDisplayName"] as? String)
+                    ?? (plist?["CFBundleName"] as? String)
+                    ?? finderName
+
+                var matchingNames = Set<String>()
+                for candidate in [
+                    finderName,
+                    diskName,
+                    displayName,
+                    plist?["CFBundleName"] as? String,
+                    plist?["CFBundleExecutable"] as? String
+                ].compactMap({ $0 }) {
+                    let normalized = normalizeAppIdentifier(candidate)
+                    if normalized.count >= 4 {
+                        matchingNames.insert(normalized)
+                    }
+                }
+
+                var relatedIdentifiers = Set<String>()
+                var applicationGroups = Set<String>()
+                if let bundleIdentifier {
+                    relatedIdentifiers.insert(bundleIdentifier.lowercased())
+                }
+                if includingAssociations {
+                    relatedIdentifiers.formUnion(Self.embeddedBundleIdentifiers(in: bundleURL))
+                    let signing = Self.signingFacts(at: bundleURL)
+                    relatedIdentifiers.formUnion(signing.identifiers)
+                    applicationGroups = signing.applicationGroups
+                }
+                let homebrewPath = Self.homebrewCaskPath(forResolvedAppPath: resolvedPath)
+                let isSetapp = path.contains("/Applications/Setapp/")
+                    || path.contains("/Setapp/")
+
+                applications.append(InstalledApplication(
+                    name: displayName,
+                    bundleIdentifier: bundleIdentifier,
+                    path: path,
+                    matchingNames: matchingNames,
+                    relatedIdentifiers: relatedIdentifiers,
+                    applicationGroups: applicationGroups,
+                    managedPaths: Set([homebrewPath].compactMap { $0 }),
+                    installSource: homebrewPath == nil
+                        ? (isSetapp ? "Setapp" : nil)
+                        : "Homebrew Cask"
+                ))
+            }
+        }
+
+        return applications.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private static func isProtectedSystemApplicationPath(_ resolvedPath: String) -> Bool {
+        resolvedPath.hasPrefix("/System/")
+            || resolvedPath.hasPrefix("/System/Cryptexes/")
+            || resolvedPath.hasPrefix("/Library/Apple/")
+            || resolvedPath.hasPrefix("/Library/Apple/System/")
+            || resolvedPath.hasPrefix("/usr/")
+    }
+
+    // Hard-block a few OS stubs that can appear under /Applications on some setups.
+    // Do not blanket-filter com.apple.* -- Xcode, iWork, and pro apps are valid targets.
+    private static func isBlockedSystemBundleIdentifier(_ bundleIdentifier: String?) -> Bool {
+        guard let bundleIdentifier else { return false }
+        let blocked = Set([
+            "com.apple.Safari",
+            "com.apple.finder",
+            "com.apple.systempreferences",
+            "com.apple.SoftwareUpdate",
+            "com.apple.Terminal"
+        ])
+        return blocked.contains(bundleIdentifier)
+    }
+
+    // Apple platform code (non-zero platform identifier + Apple anchor) is OS-managed,
+    // even when a copy briefly appears outside /System.
+    private static func isApplePlatformSystemApplication(at appURL: URL) -> Bool {
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(
+            appURL as CFURL,
+            SecCSFlags(rawValue: 0),
+            &staticCode
+        ) == errSecSuccess,
+              let staticCode else {
+            return false
+        }
+
+        var appleAnchor: SecRequirement?
+        guard SecRequirementCreateWithString(
+            "anchor apple" as CFString,
+            SecCSFlags(rawValue: 0),
+            &appleAnchor
+        ) == errSecSuccess,
+              let appleAnchor,
+              SecStaticCodeCheckValidity(
+                staticCode,
+                SecCSFlags(rawValue: kSecCSCheckAllArchitectures),
+                appleAnchor
+              ) == errSecSuccess else {
+            return false
+        }
+
+        var signingInfo: CFDictionary?
+        guard SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &signingInfo
+        ) == errSecSuccess,
+              let info = signingInfo as? [String: Any],
+              let platform = info[kSecCodeInfoPlatformIdentifier as String] as? NSNumber else {
+            return false
+        }
+        return platform.uint32Value != 0
+    }
+
+    private static func embeddedBundleIdentifiers(in appURL: URL) -> Set<String> {
+        let relativeRoots = [
+            "Contents/PlugIns",
+            "Contents/XPCServices",
+            "Contents/Library/LoginItems"
+        ]
+        let bundleExtensions = Set(["app", "appex", "xpc"])
+        let fileManager = FileManager.default
+        var identifiers = Set<String>()
+
+        for relativeRoot in relativeRoots {
+            let rootURL = appURL.appendingPathComponent(relativeRoot)
+            // One level is enough for standard macOS layout and avoids walking
+            // each extension's own resource tree.
+            guard let children = try? fileManager.contentsOfDirectory(
+                at: rootURL,
+                includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            for child in children {
+                let values = try? child.resourceValues(forKeys: [
+                    .isDirectoryKey,
+                    .isSymbolicLinkKey
+                ])
+                guard values?.isDirectory == true,
+                      values?.isSymbolicLink != true,
+                      bundleExtensions.contains(child.pathExtension.lowercased()) else {
+                    continue
+                }
+                if let identifier = Bundle(url: child)?.bundleIdentifier {
+                    identifiers.insert(identifier.lowercased())
+                }
+            }
+        }
+
+        return identifiers
+    }
+
+    private static func signingFacts(
+        at appURL: URL
+    ) -> (identifiers: Set<String>, applicationGroups: Set<String>) {
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(
+            appURL as CFURL,
+            SecCSFlags(rawValue: 0),
+            &staticCode
+        ) == errSecSuccess,
+              let staticCode else {
+            return ([], [])
+        }
+
+        var signingInfo: CFDictionary?
+        guard SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &signingInfo
+        ) == errSecSuccess,
+              let info = signingInfo as? [String: Any] else {
+            return ([], [])
+        }
+
+        let entitlements = info[kSecCodeInfoEntitlementsDict as String] as? [String: Any] ?? [:]
+        var identifiers = Set<String>()
+        var applicationGroups = Set<String>()
+
+        if let signingIdentifier = info[kSecCodeInfoIdentifier as String] as? String,
+           !signingIdentifier.isEmpty {
+            identifiers.insert(signingIdentifier.lowercased())
+        }
+
+        let applicationIdentifier = (entitlements["application-identifier"] as? String)
+            ?? (entitlements["com.apple.application-identifier"] as? String)
+        if let applicationIdentifier, !applicationIdentifier.isEmpty {
+            let lowered = applicationIdentifier.lowercased()
+            identifiers.insert(lowered)
+            // Strip only an exact 10-character Team ID prefix when present.
+            let parts = lowered.split(separator: ".", maxSplits: 1).map(String.init)
+            if parts.count == 2,
+               parts[0].count == 10,
+               parts[0].allSatisfy({ $0.isNumber || ($0 >= "a" && $0 <= "z") }) {
+                identifiers.insert(parts[1])
+            }
+        }
+
+        if let groups = entitlements["com.apple.security.application-groups"] as? [String] {
+            applicationGroups = Set(
+                groups
+                    .map { $0.lowercased() }
+                    .filter { !$0.isEmpty }
+            )
+        }
+
+        return (identifiers, applicationGroups)
+    }
+
+    private static func homebrewCaskPath(forResolvedAppPath path: String) -> String? {
+        for root in ["/opt/homebrew/Caskroom", "/usr/local/Caskroom"] {
+            let prefix = "\(root)/"
+            guard path.hasPrefix(prefix) else { continue }
+            let remainder = String(path.dropFirst(prefix.count))
+            guard let caskName = remainder.split(separator: "/").first else { continue }
+            return "\(root)/\(caskName)"
+        }
+        return nil
     }
 
     // LaunchServices knows where every registered bundle id actually lives, including
@@ -170,7 +454,7 @@ private nonisolated final class InstalledAppIndex: @unchecked Sendable {
 
         while let (path, depth) = pending.popLast() {
             guard let entries = try? fileManager.contentsOfDirectory(atPath: path) else { continue }
-            for entry in entries where !entry.hasPrefix(".") {
+            for entry in entries {
                 let fullPath = (path as NSString).appendingPathComponent(entry)
                 var isDirectory: ObjCBool = false
                 guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory),
@@ -618,6 +902,10 @@ nonisolated struct DetailScanResult: Sendable {
 nonisolated struct FileSystemScanner: Sendable {
     // Scan configured paths synchronously. Callers are responsible for running this off the main thread.
     func scanCategories(mode: ScanMode) -> CategoryScanResult {
+        if mode == .uninstallApps {
+            return scanInstalledApplicationsForUninstall()
+        }
+
         var foundCategories: [CategoryItem] = []
         var containerAccessDenied = false
         let fileManager = FileManager.default
@@ -678,6 +966,370 @@ nonisolated struct FileSystemScanner: Sendable {
         )
     }
 
+    // Fast first paint: list apps with only the .app bundle as a child. Related files
+    // and sizes are filled in by enrichUninstallApplications / measureUninstallApplication.
+    private func scanInstalledApplicationsForUninstall() -> CategoryScanResult {
+        let applications = InstalledAppIndex.shared.userInstalledApplications(
+            includingAssociations: false
+        )
+        let items = applications.map { uninstallItem(for: $0, relatedPaths: []) }
+        return CategoryScanResult(categories: items, containerAccessDenied: false)
+    }
+
+    // Resolve helpers, app groups, LaunchAgents, and Library leftovers for the listed apps.
+    func enrichUninstallApplications(
+        _ items: [CategoryItem]
+    ) -> (items: [CategoryItem], accessDenied: Bool) {
+        let applications = InstalledAppIndex.shared.userInstalledApplications(
+            includingAssociations: true
+        )
+        let applicationsByPath = Dictionary(
+            uniqueKeysWithValues: applications.map { ($0.path, $0) }
+        )
+        let associationResult = findAssociatedPaths(for: applications)
+        let enriched = items.map { item -> CategoryItem in
+            guard item.isAtomicSelection,
+                  let application = applicationsByPath[item.pathDescription] else {
+                return item
+            }
+            let relatedPaths = (associationResult.paths[application.path] ?? [])
+                .union(application.managedPaths)
+                .sorted()
+            return uninstallItem(for: application, relatedPaths: relatedPaths)
+        }
+        return (enriched, associationResult.accessDenied)
+    }
+
+    func measureUninstallApplication(_ item: CategoryItem) -> CategoryItem {
+        guard item.isAtomicSelection else { return item }
+        let fileManager = FileManager.default
+        var measuredItem = item
+        let measuredChildren = (item.children ?? []).map { child -> CategoryItem in
+            var measuredChild = child
+            var isDirectory: ObjCBool = false
+            let bytes = fileManager.fileExists(
+                atPath: child.pathDescription,
+                isDirectory: &isDirectory
+            ) ? calculateDirectorySize(
+                at: child.pathDescription,
+                isDirectory: isDirectory.boolValue
+            ) : 0
+            measuredChild.sizeBytes = bytes
+            measuredChild.sizeString = bytes > 0 ? formatBytes(bytes) : ""
+            return measuredChild
+        }
+        let totalBytes = measuredChildren.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        measuredItem.children = measuredChildren
+        measuredItem.sizeBytes = totalBytes
+        measuredItem.sizeString = totalBytes > 0 ? formatBytes(totalBytes) : ""
+        return measuredItem
+    }
+
+    private func uninstallItem(
+        for application: InstalledApplication,
+        relatedPaths: [String]
+    ) -> CategoryItem {
+        let paths = [application.path] + relatedPaths
+        let identifier = application.bundleIdentifier ?? String(localized: "No Bundle Identifier")
+        let rule = CleanRule(
+            name: application.name,
+            pathDescription: application.path,
+            iconName: "app.fill",
+            iconColor: .indigo,
+            cleanType: .trashPaths(paths),
+            note: LocalizedStringKey(
+                "\(identifier) · App + \(relatedPaths.count) related items"
+            ),
+            scanMode: .uninstallApps
+        )
+        let children = paths.map { path in
+            uninstallDetailItem(
+                path: path,
+                application: application,
+                isAppBundle: path == application.path
+            )
+        }
+
+        return CategoryItem(
+            name: application.name,
+            pathDescription: application.path,
+            iconName: rule.iconName,
+            iconColor: rule.iconColor,
+            sizeBytes: 0,
+            sizeString: "",
+            rule: rule,
+            children: children,
+            finderPath: application.path,
+            displayPath: application.name,
+            description: rule.note,
+            isAtomicSelection: true
+        )
+    }
+
+    private func uninstallDetailItem(
+        path: String,
+        application: InstalledApplication,
+        isAppBundle: Bool
+    ) -> CategoryItem {
+        let description: LocalizedStringKey
+        if isAppBundle {
+            if application.installSource == "Setapp" {
+                description = "Application Bundle · Managed by Setapp"
+            } else {
+                description = "Application Bundle"
+            }
+        } else if application.managedPaths.contains(path) {
+            description = "Homebrew Cask Installation"
+        } else {
+            description = associatedPathDescription(path)
+        }
+        let childRule = CleanRule(
+            name: (path as NSString).lastPathComponent,
+            pathDescription: path,
+            iconName: isAppBundle ? "app.fill" : associationIcon(path),
+            iconColor: isAppBundle ? .indigo : .secondary,
+            cleanType: .none,
+            note: description,
+            isCheckboxHidden: true,
+            scanMode: .uninstallApps
+        )
+        return CategoryItem(
+            name: childRule.name,
+            pathDescription: path,
+            iconName: childRule.iconName,
+            iconColor: childRule.iconColor,
+            sizeBytes: 0,
+            sizeString: "",
+            rule: childRule,
+            isSelected: false,
+            isDisplayOnly: true,
+            finderPath: path,
+            description: description,
+            isSelectionDetail: true,
+            isRequiredSelectionDetail: isAppBundle
+        )
+    }
+
+    private func associatedPathDescription(_ path: String) -> LocalizedStringKey {
+        if path.contains("/Library/Containers/")
+            || path.contains("/Library/Group Containers/") {
+            return "App Container"
+        }
+        if path.contains("/Library/Preferences/") {
+            return "Preferences"
+        }
+        if path.contains("/Library/Caches/") {
+            return "Cache"
+        }
+        if path.contains("/Library/Logs/") {
+            return "Log"
+        }
+        if path.contains("/Library/LaunchAgents/")
+            || path.contains("/Library/LaunchDaemons/") {
+            return "Launch Agent"
+        }
+        if path.contains("/Library/Services/") {
+            return "Service"
+        }
+        if path.contains("/Library/Internet Plug-Ins/") {
+            return "Internet Plug-In"
+        }
+        if path.contains("/Library/Saved Application State/") {
+            return "Saved App State"
+        }
+        return "Related App Data"
+    }
+
+    private func associationIcon(_ path: String) -> String {
+        if path.contains("/Containers/") { return "shippingbox.fill" }
+        if path.contains("/Preferences/") { return "gearshape.fill" }
+        if path.contains("/Caches/") { return "archivebox.fill" }
+        if path.contains("/Logs/") { return "doc.text.fill" }
+        if path.contains("/LaunchAgents/") || path.contains("/LaunchDaemons/") {
+            return "bolt.fill"
+        }
+        if path.contains("/Services/") { return "gearshape.2.fill" }
+        if path.contains("/Internet Plug-Ins/") { return "puzzlepiece.extension.fill" }
+        return "folder.fill"
+    }
+
+    private enum AssociationMatchMode {
+        case fuzzyIdentifier
+        case exactBundleIdentifier
+        case exactApplicationGroup
+    }
+
+    private func findAssociatedPaths(
+        for applications: [InstalledApplication]
+    ) -> (paths: [String: Set<String>], accessDenied: Bool) {
+        let locations: [(
+            path: String,
+            allowsNameMatch: Bool,
+            readsContainerMetadata: Bool,
+            matchesLaunchProgram: Bool,
+            matchMode: AssociationMatchMode
+        )] = [
+            ("~/Library/Application Support", true, false, false, .fuzzyIdentifier),
+            ("~/Library/Caches", true, false, false, .fuzzyIdentifier),
+            ("~/Library/Logs", true, false, false, .fuzzyIdentifier),
+            ("~/Library/Preferences", false, false, false, .fuzzyIdentifier),
+            ("~/Library/Preferences/ByHost", false, false, false, .fuzzyIdentifier),
+            ("~/Library/Saved Application State", false, false, false, .fuzzyIdentifier),
+            ("~/Library/WebKit", false, false, false, .fuzzyIdentifier),
+            ("~/Library/HTTPStorages", false, false, false, .fuzzyIdentifier),
+            ("~/Library/Cookies", false, false, false, .fuzzyIdentifier),
+            ("~/Library/Containers", false, true, false, .exactBundleIdentifier),
+            ("~/Library/Group Containers", false, true, false, .exactApplicationGroup),
+            ("~/Library/Application Scripts", false, false, false, .exactBundleIdentifier),
+            ("~/Library/Services", true, false, false, .fuzzyIdentifier),
+            ("~/Library/Internet Plug-Ins", true, false, false, .fuzzyIdentifier),
+            ("~/Library/LaunchAgents", false, false, true, .fuzzyIdentifier),
+            ("/Library/LaunchAgents", false, false, true, .fuzzyIdentifier)
+        ]
+        let fileManager = FileManager.default
+        var result: [String: Set<String>] = [:]
+        var accessDenied = false
+
+        for location in locations {
+            let basePath = NSString(string: location.path).expandingTildeInPath
+            let entries: [String]
+            do {
+                entries = try fileManager.contentsOfDirectory(atPath: basePath)
+            } catch {
+                accessDenied = accessDenied || isPermissionDenied(error)
+                continue
+            }
+
+            for entry in entries where !entry.hasPrefix(".") {
+                let fullPath = (basePath as NSString).appendingPathComponent(entry)
+                if isSharedSetappInfrastructure(fullPath) {
+                    continue
+                }
+
+                var candidates = [entry, (entry as NSString).deletingPathExtension]
+
+                if location.readsContainerMetadata {
+                    let metadataPath = (fullPath as NSString)
+                        .appendingPathComponent(".com.apple.containermanagerd.metadata.plist")
+                    do {
+                        let data = try Data(contentsOf: URL(fileURLWithPath: metadataPath))
+                        if let plist = try? PropertyListSerialization.propertyList(
+                            from: data,
+                            options: [],
+                            format: nil
+                        ) as? [String: Any],
+                           let identifier = plist["MCMMetadataIdentifier"] as? String,
+                           !identifier.isEmpty {
+                            candidates.append(identifier)
+                        }
+                    } catch {
+                        accessDenied = accessDenied || isPermissionDenied(error)
+                    }
+                }
+
+                let matchedApplications = applications.filter { application in
+                    let identifierMatch = candidates.contains { candidate in
+                        associationCandidate(
+                            candidate,
+                            matches: application,
+                            allowsNameMatch: location.allowsNameMatch,
+                            matchMode: location.matchMode
+                        )
+                    }
+                    if identifierMatch { return true }
+                    if location.matchesLaunchProgram {
+                        return launchAgent(fullPath, launches: application)
+                    }
+                    return false
+                }
+
+                // Shared folders and group containers are intentionally left alone.
+                // They can contain data that another installed app still needs.
+                guard matchedApplications.count == 1,
+                      let application = matchedApplications.first else {
+                    continue
+                }
+                result[application.path, default: []].insert(fullPath)
+            }
+        }
+
+        return (result, accessDenied)
+    }
+
+    private func associationCandidate(
+        _ candidate: String,
+        matches application: InstalledApplication,
+        allowsNameMatch: Bool,
+        matchMode: AssociationMatchMode
+    ) -> Bool {
+        let loweredCandidate = candidate.lowercased()
+
+        switch matchMode {
+        case .exactApplicationGroup:
+            return application.applicationGroups.contains(loweredCandidate)
+        case .exactBundleIdentifier:
+            return application.relatedIdentifiers.contains(loweredCandidate)
+        case .fuzzyIdentifier:
+            for identifier in application.relatedIdentifiers {
+                if loweredCandidate == identifier
+                    || loweredCandidate.hasPrefix("\(identifier).")
+                    || loweredCandidate.hasSuffix(".\(identifier)")
+                    || loweredCandidate.contains(".\(identifier).") {
+                    return true
+                }
+            }
+            guard allowsNameMatch else { return false }
+            let normalizedCandidate = normalizeAppIdentifier(candidate)
+            return normalizedCandidate.count >= 4
+                && application.matchingNames.contains(normalizedCandidate)
+        }
+    }
+
+    // Setapp Desktop / shared agents must not be attributed to a single Setapp app.
+    private func isSharedSetappInfrastructure(_ path: String) -> Bool {
+        let lowered = path.lowercased()
+        let sharedMarkers = [
+            "/applications/setapp/setapp.app",
+            "/library/application support/setapp",
+            "/library/caches/setapp",
+            "/library/logs/setapp",
+            "/library/launchagents/com.setapp.",
+            "/library/containers/com.setapp."
+        ]
+        return sharedMarkers.contains { lowered.contains($0) }
+    }
+
+    private func launchAgent(
+        _ plistPath: String,
+        launches application: InstalledApplication
+    ) -> Bool {
+        guard plistPath.lowercased().hasSuffix(".plist"),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: plistPath)),
+              let plist = try? PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+              ) as? [String: Any] else {
+            return false
+        }
+
+        var programPaths: [String] = []
+        if let program = plist["Program"] as? String {
+            programPaths.append(program)
+        }
+        if let arguments = plist["ProgramArguments"] as? [String] {
+            programPaths.append(contentsOf: arguments)
+        }
+
+        let appPath = application.path
+        let escapedAppPath = appPath.hasSuffix("/") ? String(appPath.dropLast()) : appPath
+        return programPaths.contains { argument in
+            argument == escapedAppPath
+                || argument.hasPrefix("\(escapedAppPath)/")
+                || argument.contains("\(escapedAppPath)/Contents/")
+        }
+    }
+
     private func makeReadOnly(_ item: CategoryItem) -> CategoryItem {
         var readOnlyRule = item.rule
         readOnlyRule.cleanType = .none
@@ -694,7 +1346,10 @@ nonisolated struct FileSystemScanner: Sendable {
             isDisplayOnly: true,
             finderPath: item.finderPath ?? item.pathDescription,
             displayPath: item.displayPath,
-            description: item.description
+            description: item.description,
+            isAtomicSelection: item.isAtomicSelection,
+            isSelectionDetail: item.isSelectionDetail,
+            isRequiredSelectionDetail: item.isRequiredSelectionDetail
         )
     }
 
