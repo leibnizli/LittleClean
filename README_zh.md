@@ -4,7 +4,7 @@
 
 LittleClean 是一款强大而智能的 macOS 系统清理及开发者工具管理软件。它能帮助您安全地清理缓存、日志和卸载残留，释放宝贵的磁盘空间，同时提供对已安装的开发环境及全局包的深度透视功能。
 
-<img width="832" height="629" alt="Image" src="https://github.com/user-attachments/assets/1875d06d-943b-42b9-b122-a0f69ac11488" />
+<img alt="Image" src="https://github.com/user-attachments/assets/cb2c8bd6-1722-488a-86ed-078d96868c5d" />
 
 ## 安装与运行
 
