@@ -27,7 +27,7 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            viewModel.performScan()
+            //viewModel.performScan()
             viewModel.checkForUpdates()
         }
         .alert(

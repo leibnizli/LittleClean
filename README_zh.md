@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文文档
 
-LittleClean 是一款强大而智能的 macOS 系统清理及开发者工具管理软件。它能帮助您安全地清理缓存、日志和卸载残留，释放宝贵的磁盘空间，同时提供对已安装的开发环境及全局包的深度透视功能。
+LittleClean 是一款强大而智能的 macOS 系统清理及开发者工具管理软件。它能帮助您轻松彻底地卸载应用程序、安全地清理缓存与日志，并移除残留文件以释放宝贵的磁盘空间，同时提供对已安装的开发环境及全局包的深度透视功能。
 
 <img alt="Image" src="https://github.com/user-attachments/assets/cb2c8bd6-1722-488a-86ed-078d96868c5d" />
 
@@ -14,7 +14,10 @@ LittleClean 是一款强大而智能的 macOS 系统清理及开发者工具管�
 
 ## 功能特性
 
-### 🧹 智能系统清理
+### 🗑 应用卸载 (Uninstall Apps)
+轻松且彻底地移除不需要的应用程序，同时自动清理其关联的缓存、偏好设置及残留文件。
+
+### 🧹 安全清理 (Safe Cleanup)
 LittleClean 能够对占据磁盘空间的无用文件进行分类并安全清理：
 - **系统废纸篓与日志:** 清空废纸篓并清理系统日志。
 - **应用缓存:** 清理 `~/Library/Caches` 以释放空间。
@@ -22,15 +25,9 @@ LittleClean 能够对占据磁盘空间的无用文件进行分类并安全清�
 - **已卸载应用残留:** 智能检测并移除 `~/Library/Application Support` 中已经被卸载的应用残留文件。
 - **用户目录残留:** 发现并清理主目录下过时的隐藏配置文件和无用数据。
 
-### 🛠 Xcode & iOS 开发者专属清理
-专门为 iOS 和 macOS 开发者打造，用于管理 Xcode 庞大的磁盘占用：
-- **Xcode DerivedData & Archives:** 快速清理 DerivedData 和打包的 Archives。
-- **iOS 模拟器缓存:** 清理核心模拟器缓存。
-- **按版本分类的模拟器设备:** 查看并管理按 iOS 版本分类的模拟器大小。
-- **失效模拟器 (Unavailable Simulators):** 自动检测并移除系统已不再支持或失效的模拟器。
-
-### 📦 开发者工具透视 (只读)
-完整掌握您的开发环境及全局依赖包的大小和位置：
+### 🛠 深度分析 (Deep Analysis)
+完整掌握您的开发环境及全局依赖包的大小和位置，并提供 Xcode 专属清理：
+- **Xcode & iOS 开发者专属清理:** 快速清理 DerivedData、打包的 Archives、核心模拟器缓存，并自动移除失效模拟器。
 - **Homebrew:** 追踪已安装的 Formulae 和 Casks。
 - **Node.js:** 全面扫描 Node.js 安装情况，支持所有主流版本管理器（`nvm`、`fnm`、`volta`、`asdf`、`nodenv`、`n`、Homebrew、`/usr/local` 及环境变量 PATH），精准定位全局包。
 - **全局包管理器:** 查看以下工具的全局包及占用空间：

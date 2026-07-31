@@ -2,7 +2,7 @@
 
 [中文文档](README_zh.md) | English
 
-LittleClean is a powerful and intelligent macOS cleaner and developer tool manager. It helps you reclaim valuable disk space by safely removing caches, logs, and leftovers, while also providing deep visibility into installed development tools and environments.
+LittleClean is a powerful and intelligent macOS cleaner and developer tool manager. It helps you reclaim valuable disk space by completely uninstalling unwanted applications and safely removing caches, logs, and leftovers, while also providing deep visibility into installed development tools and environments.
 
 <img alt="Image" src="https://github.com/user-attachments/assets/cb2c8bd6-1722-488a-86ed-078d96868c5d" />
 
@@ -14,7 +14,10 @@ Alternatively, you can clone the repository and build via Xcode.
 
 ## Features
 
-### 🧹 Smart System Cleaning
+### 🗑 Uninstall Apps
+Easily and completely remove unwanted applications along with their associated caches, preferences, and leftovers.
+
+### 🧹 Safe Cleanup
 LittleClean categorizes and safely cleans up unnecessary files occupying your disk:
 - **System Trash & Logs:** Empty the trash bin and clear system logs.
 - **App Caches:** Clear `~/Library/Caches` to free up space.
@@ -22,15 +25,9 @@ LittleClean categorizes and safely cleans up unnecessary files occupying your di
 - **Uninstalled App Leftovers:** Intelligently detect and remove leftovers in `~/Library/Application Support` for applications that have been uninstalled.
 - **Home Directory Leftovers:** Find and clean obsolete dotfiles and configurations in your home directory.
 
-### 🛠 Xcode & iOS Developer Tools
-Tailored specifically for iOS and macOS developers to manage Xcode's massive footprint:
-- **Xcode DerivedData & Archives:** Quickly clear DerivedData and Archives.
-- **iOS Simulator Caches:** Clean up core simulator caches.
-- **Simulator Devices by Version:** View and manage simulator sizes categorized by iOS version.
-- **Unavailable Simulators:** Automatically detect and remove simulators that are no longer available or supported.
-
-### 📦 Developer Tool Tracker (Read-Only)
-Gain complete visibility into the size and location of your development environments and global packages:
+### 🛠 Deep Analysis
+Gain complete visibility into the size and location of your development environments and global packages, with tailored Xcode management:
+- **Xcode & iOS Developer Tools:** Manage Xcode's massive footprint by clearing DerivedData, Archives, iOS Simulator caches, and automatically removing unavailable simulators.
 - **Homebrew:** Track installed Formulae and Casks.
 - **Node.js:** Exhaustively scans for Node.js installations across all major version managers (`nvm`, `fnm`, `volta`, `asdf`, `nodenv`, `n`, Homebrew, `/usr/local`, and active PATH) to find global packages.
 - **Global Package Managers:** View global packages and their sizes for:
