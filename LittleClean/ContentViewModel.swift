@@ -6,7 +6,6 @@ import SwiftUI
 final class ContentViewModel: ObservableObject {
     private struct ScanSnapshot {
         let categories: [CategoryItem]
-        let needsFullDiskAccess: Bool
     }
 
     @Published var totalBytes: Int64 = 0
@@ -17,6 +16,7 @@ final class ContentViewModel: ObservableObject {
     @Published var isLoadingDetails = false
     @Published var newVersionURL: String?
     @Published var cleaningErrorMessage: String?
+    @Published var cleaningErrorNeedsFullDiskAccess = false
     @Published var needsFullDiskAccess = false
     @Published var categories: [CategoryItem] = []
     @Published var sortOrder: [KeyPathComparator<CategoryItem>] = [
@@ -96,10 +96,19 @@ final class ContentViewModel: ObservableObject {
 
         if let snapshot = scanCache[scanMode] {
             categories = snapshot.categories
-            needsFullDiskAccess = snapshot.needsFullDiskAccess
             loadRealDiskSpace()
         } else {
             performScan()
+        }
+    }
+
+    func refreshFullDiskAccessStatus() {
+        let scanner = scanner
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let granted = scanner.hasFullDiskAccess()
+            DispatchQueue.main.async {
+                self?.needsFullDiskAccess = !granted
+            }
         }
     }
 
@@ -121,7 +130,6 @@ final class ContentViewModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self, token == self.scanToken, mode == self.scanMode else { return }
                 self.categories = result.categories
-                self.needsFullDiskAccess = result.containerAccessDenied
                 self.isScanning = false
                 if mode == .deepAnalysis {
                     self.loadDetails(for: token)
@@ -279,8 +287,6 @@ final class ContentViewModel: ObservableObject {
                       scanToken == self.scanToken,
                       self.scanMode == .deepAnalysis,
                       !self.isScanning else { return }
-                self.needsFullDiskAccess = self.needsFullDiskAccess
-                    || detailResult.containerAccessDenied
                 let detailItems = detailResult.items
                 let existingNames = Set(self.categories.filter(\.isDisplayOnly).map(\.name))
                 for detailItem in detailItems where !existingNames.contains(detailItem.name) {
@@ -340,7 +346,6 @@ final class ContentViewModel: ObservableObject {
                       !self.isScanning else { return }
                 let selectedPaths = self.selectedUninstallDetailPaths()
                 self.categories = enrichment.items
-                self.needsFullDiskAccess = self.needsFullDiskAccess || enrichment.accessDenied
                 self.restoreUninstallSelection(matching: selectedPaths)
             }
 
@@ -409,12 +414,12 @@ final class ContentViewModel: ObservableObject {
                 guard let self else { return }
                 self.categories = result.categories
                 self.isCleaning = false
-                if result.failures.contains(where: self.requiresFullDiskAccess) {
-                    self.needsFullDiskAccess = result.failures.contains(where: self.requiresFullDiskAccess)
-                }
+                let needsAccess = result.failures.contains(where: self.requiresFullDiskAccess)
+                self.cleaningErrorNeedsFullDiskAccess = needsAccess
                 if !result.failures.isEmpty {
                     self.cleaningErrorMessage = self.cleanFailureMessage(result.failures)
                 }
+                self.refreshFullDiskAccessStatus()
                 if clearingAllSelection {
                     self.selectedIDs = []
                 } else {
@@ -423,19 +428,32 @@ final class ContentViewModel: ObservableObject {
                 self.scanCache.removeAll()
                 self.loadRealDiskSpace()
                 if cleaningMode == .uninstallApps, self.scanMode == cleaningMode {
-                    self.performScan()
-                } else {
-                    self.cacheCurrentScan(for: self.scanMode)
+                    // Drop apps whose bundle is gone instead of a full rescan.
+                    self.categories = self.prunedUninstallCategories(
+                        self.categories,
+                        cleanedIDs: cleanedIDs
+                    )
                 }
+                self.cacheCurrentScan(for: self.scanMode)
             }
         }
     }
 
     private func cacheCurrentScan(for mode: ScanMode) {
-        scanCache[mode] = ScanSnapshot(
-            categories: categories,
-            needsFullDiskAccess: needsFullDiskAccess
-        )
+        scanCache[mode] = ScanSnapshot(categories: categories)
+    }
+
+    private func prunedUninstallCategories(
+        _ items: [CategoryItem],
+        cleanedIDs: Set<UUID>
+    ) -> [CategoryItem] {
+        items.filter { item in
+            guard item.isAtomicSelection, cleanedIDs.contains(item.id) else {
+                return true
+            }
+            let expanded = NSString(string: item.pathDescription).expandingTildeInPath
+            return FileManager.default.fileExists(atPath: expanded)
+        }
     }
 
     private func cleanFailureMessage(_ failures: [CleanFailure]) -> String {

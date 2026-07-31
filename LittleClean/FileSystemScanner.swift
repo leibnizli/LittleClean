@@ -2415,6 +2415,29 @@ nonisolated struct FileSystemScanner: Sendable {
         return false
     }
 
+    // macOS has no public FDA API; probe TCC-protected locations this app needs.
+    // A successful read of another app's container implies Full Disk Access.
+    func hasFullDiskAccess() -> Bool {
+        let candidates = [
+            "~/Library/Containers/com.apple.stocks",
+            "~/Library/Safari",
+            "~/Library/Mail"
+        ]
+        var sawPermissionDenied = false
+        for path in candidates {
+            let expanded = NSString(string: path).expandingTildeInPath
+            do {
+                _ = try FileManager.default.contentsOfDirectory(atPath: expanded)
+                return true
+            } catch {
+                if isPermissionDenied(error) {
+                    sawPermissionDenied = true
+                }
+            }
+        }
+        return !sawPermissionDenied
+    }
+
     // Scan known tool cache locations under the home directory
     private func scanHomeCaches(basePath: String) -> [CategoryItem] {
         let home = NSHomeDirectory()

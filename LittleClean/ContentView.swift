@@ -8,6 +8,7 @@ struct ContentView: View {
     private var hasSeenDeepAnalysisIntroduction = false
     @State private var isShowingDeepAnalysisIntroduction = false
     @State private var isShowingUninstallConfirmation = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,23 +29,36 @@ struct ContentView: View {
         }
         .onAppear {
             //viewModel.performScan()
+            viewModel.refreshFullDiskAccessStatus()
             viewModel.checkForUpdates()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                viewModel.refreshFullDiskAccessStatus()
+            }
         }
         .alert(
             "Deletion Failed",
             isPresented: Binding(
                 get: { viewModel.cleaningErrorMessage != nil },
-                set: { if !$0 { viewModel.cleaningErrorMessage = nil } }
+                set: {
+                    if !$0 {
+                        viewModel.cleaningErrorMessage = nil
+                        viewModel.cleaningErrorNeedsFullDiskAccess = false
+                    }
+                }
             )
         ) {
-            if viewModel.needsFullDiskAccess {
+            if viewModel.cleaningErrorNeedsFullDiskAccess {
                 Button("Open Full Disk Access Settings") {
                     viewModel.openFullDiskAccessSettings()
                     viewModel.cleaningErrorMessage = nil
+                    viewModel.cleaningErrorNeedsFullDiskAccess = false
                 }
             }
             Button("OK", role: .cancel) {
                 viewModel.cleaningErrorMessage = nil
+                viewModel.cleaningErrorNeedsFullDiskAccess = false
             }
         } message: {
             Text(viewModel.cleaningErrorMessage ?? "")
