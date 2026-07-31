@@ -334,6 +334,17 @@
         }
       }
     },
+    "LittleClean refuses to remove itself or a protected system application." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LittleClean 不会删除自身或受保护的系统应用。"
+          }
+        }
+      }
+    },
     "Log" : {
       "localizations" : {
         "zh-Hans" : {

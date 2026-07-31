@@ -1357,15 +1357,13 @@ nonisolated struct FileSystemScanner: Sendable {
     func scanDetails() -> DetailScanResult {
         let toolsItem = scanInstalledTools()
         let homeItem = scanHomeDirectory()
-        let appDataItem = scanInstalledAppData(basePath: "~/Library/Application Support")
-        let containerResult = scanInstalledAppContainers()
-        let items = ([toolsItem] + [homeItem, appDataItem, containerResult.item].compactMap { $0 }).filter {
+        let items = ([toolsItem, homeItem].compactMap { $0 }).filter {
             guard let children = $0.children else { return false }
             return !children.isEmpty
         }
         return DetailScanResult(
             items: items,
-            containerAccessDenied: containerResult.accessDenied
+            containerAccessDenied: false
         )
     }
 

@@ -175,10 +175,10 @@ nonisolated struct Cleaner: Sendable {
             if isCurrentApp || isSystemApp {
                 return CleanFailure(
                     path: appPath,
-                    domain: "DeepClean",
+                    domain: "LittleClean",
                     code: 1,
                     reason: String(
-                        localized: "DeepClean refuses to remove itself or a protected system application."
+                        localized: "LittleClean refuses to remove itself or a protected system application."
                     )
                 )
             }
@@ -189,7 +189,7 @@ nonisolated struct Cleaner: Sendable {
                ).isEmpty {
                 return CleanFailure(
                     path: appPath,
-                    domain: "DeepClean",
+                    domain: "LittleClean",
                     code: 2,
                     reason: String(
                         localized: "The application is running. Quit it completely, then try again."
