@@ -328,7 +328,7 @@ private struct ModeListPane: View {
                 HStack(alignment: .center, spacing: 6) {
                     if item.isAtomicSelection {
                         let state = viewModel.selectionState(for: item, in: session)
-                        let enabled = viewModel.isCleanable(item, in: session)
+                        let enabled = viewModel.isCleanable(item, in: session) && !session.isBusy
                         Button {
                             viewModel.toggleSelection(item, in: session)
                         } label: {
@@ -346,14 +346,17 @@ private struct ModeListPane: View {
                             .frame(width: 20, height: 20)
                     } else if item.isSelectionDetail {
                         let state = viewModel.selectionState(for: item, in: session)
+                        let enabled = !item.isRequiredSelectionDetail && !session.isBusy
                         Button {
                             viewModel.toggleSelection(item, in: session)
                         } label: {
                             Image(systemName: state.symbolName)
-                                .foregroundColor(Color(NSColor.controlAccentColor))
+                                .foregroundColor(
+                                    enabled ? Color(NSColor.controlAccentColor) : .secondary
+                                )
                         }
                         .buttonStyle(.plain)
-                        .disabled(item.isRequiredSelectionDetail)
+                        .disabled(!enabled)
                         .help(
                             item.isRequiredSelectionDetail
                                 ? Text("The application bundle is required.")
@@ -377,7 +380,7 @@ private struct ModeListPane: View {
                             .frame(width: 16)
                     } else {
                         let state = viewModel.selectionState(for: item, in: session)
-                        let enabled = viewModel.isCleanable(item, in: session)
+                        let enabled = viewModel.isCleanable(item, in: session) && !session.isBusy
                         Button {
                             viewModel.toggleSelection(item, in: session)
                         } label: {
