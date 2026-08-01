@@ -14,7 +14,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             topStatusBar
             Divider()
-            cleanListView
+            modeTabs
             Divider()
             bottomActionBar
         }
@@ -28,7 +28,7 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            //viewModel.performScan()
+            viewModel.ensureLoaded(.uninstallApps)
             viewModel.refreshFullDiskAccessStatus()
             viewModel.checkForUpdates()
         }
@@ -65,17 +65,272 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Cleanable Directory Outline Table
+    // MARK: - Mode Tabs
 
-    private var cleanListView: some View {
-        Table(viewModel.displayedCategories, children: \.children, sortOrder: $viewModel.sortOrder) {
+    private var modeTabs: some View {
+        ZStack {
+            ModeListPane(
+                viewModel: viewModel,
+                session: viewModel.uninstallSession
+            )
+            .opacity(viewModel.scanMode == .uninstallApps ? 1 : 0)
+            .allowsHitTesting(viewModel.scanMode == .uninstallApps)
+
+            ModeListPane(
+                viewModel: viewModel,
+                session: viewModel.safeCleanupSession
+            )
+            .opacity(viewModel.scanMode == .safeCleanup ? 1 : 0)
+            .allowsHitTesting(viewModel.scanMode == .safeCleanup)
+
+            ModeListPane(
+                viewModel: viewModel,
+                session: viewModel.deepAnalysisSession
+            )
+            .opacity(viewModel.scanMode == .deepAnalysis ? 1 : 0)
+            .allowsHitTesting(viewModel.scanMode == .deepAnalysis)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Top Status Bar
+
+    private var topStatusBar: some View {
+        let session = viewModel.activeSession
+        return HStack(spacing: 14) {
+            Label(
+                "\(formatBytes(viewModel.usedBytes)) / \(formatBytes(viewModel.totalBytes))",
+                systemImage: "internaldrive"
+            )
+            .foregroundColor(.secondary)
+            .font(.system(size: 12))
+
+            Text("Free \(formatBytes(viewModel.freeBytes))")
+                .foregroundColor(.green)
+                .font(.system(size: 12))
+
+            if viewModel.needsFullDiskAccess {
+                Button {
+                    viewModel.openFullDiskAccessSettings()
+                } label: {
+                    Label("Enable Full Disk Access", systemImage: "lock.shield.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.orange)
+                .help("Open Full Disk Access Settings")
+            }
+
+            Spacer()
+
+            if session.isScanning {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Scanning…")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else if session.isCleaning {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Cleaning…")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else if session.isLoadingDetails {
+                ProgressView()
+                    .controlSize(.small)
+                Text(
+                    session.mode == .uninstallApps
+                        ? "Analyzing apps…"
+                        : "Scanning…"
+                )
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } else {
+                Button {
+                    viewModel.performScan()
+                } label: {
+                    Text("Scan")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private var scanModePicker: some View {
+        Picker("Mode", selection: scanModeSelection) {
+            Text("Uninstall Apps")
+                .tag(ScanMode.uninstallApps)
+            Text("Safe Cleanup")
+                .tag(ScanMode.safeCleanup)
+            Text("Deep Analysis")
+                .tag(ScanMode.deepAnalysis)
+        }
+        .pickerStyle(.segmented)
+        .help(scanModeHelp)
+        .alert(
+            "About Deep Analysis",
+            isPresented: $isShowingDeepAnalysisIntroduction
+        ) {
+            Button("Continue") {
+                hasSeenDeepAnalysisIntroduction = true
+                viewModel.selectScanMode(.deepAnalysis)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(
+                "Deep Analysis is read-only and shows content outside Safe Cleanup. Nothing in this mode can be deleted."
+            )
+        }
+    }
+
+    private var searchField: some View {
+        let session = viewModel.activeSession
+        return SystemSearchField(
+            text: Binding(
+                get: { session.searchText },
+                set: { session.searchText = $0 }
+            ),
+            placeholder: String(localized: "Search")
+        )
+        .frame(width: 180)
+        .disabled(session.isScanning || session.isLoadingDetails)
+        .id(session.mode)
+    }
+
+    private var scanModeSelection: Binding<ScanMode> {
+        Binding(
+            get: { viewModel.scanMode },
+            set: { newMode in
+                if newMode == .deepAnalysis && !hasSeenDeepAnalysisIntroduction {
+                    isShowingDeepAnalysisIntroduction = true
+                } else {
+                    viewModel.selectScanMode(newMode)
+                }
+            }
+        )
+    }
+
+    private var scanModeHelp: Text {
+        switch viewModel.scanMode {
+        case .uninstallApps:
+            Text("Remove installed apps and their matching user data.")
+        case .safeCleanup:
+            Text("Lower-risk paths that can be cleaned.")
+        case .deepAnalysis:
+            Text("Read-only content outside Safe Cleanup.")
+        }
+    }
+
+    // MARK: - Bottom Action Bar
+
+    private var bottomActionBar: some View {
+        let session = viewModel.activeSession
+        return HStack(spacing: 14) {
+            if session.mode == .uninstallApps {
+                Button {
+                    isShowingUninstallConfirmation = true
+                } label: {
+                    Text("Uninstall")
+                }
+                .disabled(session.selectedIDs.isEmpty || session.isBusy)
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .alert(
+                    "Uninstall Selected Apps?",
+                    isPresented: $isShowingUninstallConfirmation
+                ) {
+                    Button("Uninstall", role: .destructive) {
+                        viewModel.performCleanSelected(in: session)
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(verbatim: uninstallConfirmationMessage(for: session))
+                }
+
+                if !session.selectedIDs.isEmpty {
+                    Text("Selected \(formatBytes(session.selectedTotalBytes))")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+            } else if session.mode == .safeCleanup {
+                Button {
+                    viewModel.performCleanSelected(in: session)
+                } label: {
+                    Text("Clean")
+                }
+                .disabled(session.selectedIDs.isEmpty || session.isScanning || session.isCleaning)
+                .buttonStyle(.borderedProminent)
+                if !session.selectedIDs.isEmpty {
+                    Text("Selected \(formatBytes(session.selectedTotalBytes))")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+
+                Text("App cannot accurately determine deletable items. Please review carefully.")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            } else {
+                Text("Read-only analysis")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            if let versionURL = viewModel.newVersionURL, let url = URL(string: versionURL) {
+                Link("New Version Available", destination: url)
+                    .foregroundColor(.blue)
+                    .font(.system(size: 13))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 7)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private func uninstallConfirmationMessage(for session: ScanModeSession) -> String {
+        let names = session.selectedItemNames
+        let displayedNames = names.prefix(6).joined(separator: "\n")
+        let remainingCount = max(0, names.count - 6)
+        let remaining = remainingCount > 0
+            ? "\n" + String(localized: "…and \(remainingCount) more")
+            : ""
+        let heading = String(
+            localized: "The following apps and their matching files will be moved to Trash:"
+        )
+        let guidance = String(
+            localized: "Quit these apps first. Some containers may require Full Disk Access. Items remain recoverable until Trash is emptied."
+        )
+        return """
+        \(heading)
+
+        \(displayedNames)\(remaining)
+
+        \(guidance)
+        """
+    }
+}
+
+// MARK: - Per-mode list pane (kept alive across tab switches)
+
+@MainActor
+private struct ModeListPane: View {
+    @ObservedObject var viewModel: ContentViewModel
+    @ObservedObject var session: ScanModeSession
+
+    var body: some View {
+        Table(session.displayedCategories, children: \.children, sortOrder: $session.sortOrder) {
             TableColumn("Path", value: \.pathDescription) { item in
                 HStack(alignment: .center, spacing: 6) {
                     if item.isAtomicSelection {
-                        let state = viewModel.selectionState(for: item)
-                        let enabled = viewModel.isCleanable(item)
+                        let state = viewModel.selectionState(for: item, in: session)
+                        let enabled = viewModel.isCleanable(item, in: session)
                         Button {
-                            viewModel.toggleSelection(item)
+                            viewModel.toggleSelection(item, in: session)
                         } label: {
                             Image(systemName: state.symbolName)
                                 .foregroundColor(
@@ -90,9 +345,9 @@ struct ContentView: View {
                             .scaledToFit()
                             .frame(width: 20, height: 20)
                     } else if item.isSelectionDetail {
-                        let state = viewModel.selectionState(for: item)
+                        let state = viewModel.selectionState(for: item, in: session)
                         Button {
-                            viewModel.toggleSelection(item)
+                            viewModel.toggleSelection(item, in: session)
                         } label: {
                             Image(systemName: state.symbolName)
                                 .foregroundColor(Color(NSColor.controlAccentColor))
@@ -121,10 +376,10 @@ struct ContentView: View {
                             .foregroundColor(item.iconColor)
                             .frame(width: 16)
                     } else {
-                        let state = viewModel.selectionState(for: item)
-                        let enabled = viewModel.isCleanable(item)
+                        let state = viewModel.selectionState(for: item, in: session)
+                        let enabled = viewModel.isCleanable(item, in: session)
                         Button {
-                            viewModel.toggleSelection(item)
+                            viewModel.toggleSelection(item, in: session)
                         } label: {
                             Image(systemName: state.symbolName)
                                 .foregroundColor(enabled ? Color(NSColor.controlAccentColor) : .secondary)
@@ -155,7 +410,7 @@ struct ContentView: View {
                 Group {
                     if item.isAtomicSelection,
                        item.sizeString.isEmpty,
-                       viewModel.isLoadingDetails {
+                       session.isLoadingDetails {
                         ProgressView()
                             .controlSize(.small)
                     } else {
@@ -199,12 +454,12 @@ struct ContentView: View {
 
     @ViewBuilder
     private func itemContextMenu(_ item: CategoryItem) -> some View {
-        if viewModel.scanMode == .safeCleanup,
+        if session.mode == .safeCleanup,
            !item.isDisplayOnly,
            !item.rule.isCheckboxHidden,
            item.sizeBytes > 0 {
             Button(LocalizedStringKey("Clean \"\(item.name)\"")) {
-                viewModel.cleanSingleItem(item)
+                viewModel.cleanSingleItem(item, in: session)
             }
         }
 
@@ -214,229 +469,6 @@ struct ContentView: View {
                 viewModel.openInFinder(pathDescription: target)
             }
         }
-    }
-
-    // MARK: - Top Status Bar
-
-    private var topStatusBar: some View {
-        HStack(spacing: 14) {
-            Label(
-                "\(formatBytes(viewModel.usedBytes)) / \(formatBytes(viewModel.totalBytes))",
-                systemImage: "internaldrive"
-            )
-            .foregroundColor(.secondary)
-            .font(.system(size: 12))
-
-            Text("Free \(formatBytes(viewModel.freeBytes))")
-                .foregroundColor(.green)
-                .font(.system(size: 12))
-
-            if viewModel.needsFullDiskAccess {
-                Button {
-                    viewModel.openFullDiskAccessSettings()
-                } label: {
-                    Label("Enable Full Disk Access", systemImage: "lock.shield.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(.orange)
-                .help("Open Full Disk Access Settings")
-            }
-
-            Spacer()
-
-            if viewModel.isScanning {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Scanning…")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else if viewModel.isCleaning {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Cleaning…")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else if viewModel.isLoadingDetails {
-                ProgressView()
-                    .controlSize(.small)
-                Text(
-                    viewModel.scanMode == .uninstallApps
-                        ? "Analyzing apps…"
-                        : "Scanning…"
-                )
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else {
-                Button {
-                    viewModel.performScan()
-                } label: {
-                    Text("Scan")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
-        .background(Color(NSColor.windowBackgroundColor))
-    }
-
-    private var scanModePicker: some View {
-        Picker("Mode", selection: scanModeSelection) {
-            Text("Uninstall Apps")
-                .tag(ScanMode.uninstallApps)
-            Text("Safe Cleanup")
-                .tag(ScanMode.safeCleanup)
-            Text("Deep Analysis")
-                .tag(ScanMode.deepAnalysis)
-        }
-        .pickerStyle(.segmented)
-        .disabled(viewModel.isScanning || viewModel.isLoadingDetails || viewModel.isCleaning)
-        .help(scanModeHelp)
-        .alert(
-            "About Deep Analysis",
-            isPresented: $isShowingDeepAnalysisIntroduction
-        ) {
-            Button("Continue") {
-                hasSeenDeepAnalysisIntroduction = true
-                viewModel.selectScanMode(.deepAnalysis)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "Deep Analysis is read-only and shows content outside Safe Cleanup. Nothing in this mode can be deleted."
-            )
-        }
-    }
-
-    private var searchField: some View {
-        SystemSearchField(
-            text: $viewModel.searchText,
-            placeholder: String(localized: "Search")
-        )
-        .frame(width: 180)
-        .disabled(viewModel.isScanning || viewModel.isLoadingDetails)
-    }
-
-    private var scanModeSelection: Binding<ScanMode> {
-        Binding(
-            get: { viewModel.scanMode },
-            set: { newMode in
-                if newMode == .deepAnalysis && !hasSeenDeepAnalysisIntroduction {
-                    isShowingDeepAnalysisIntroduction = true
-                } else {
-                    Task { @MainActor in
-                        await Task.yield()
-                        viewModel.selectScanMode(newMode)
-                    }
-                }
-            }
-        )
-    }
-
-    private var scanModeHelp: Text {
-        switch viewModel.scanMode {
-        case .uninstallApps:
-            Text("Remove installed apps and their matching user data.")
-        case .safeCleanup:
-            Text("Lower-risk paths that can be cleaned.")
-        case .deepAnalysis:
-            Text("Read-only content outside Safe Cleanup.")
-        }
-    }
-
-    // MARK: - Bottom Action Bar
-
-    private var bottomActionBar: some View {
-        HStack(spacing: 14) {
-            if viewModel.scanMode == .uninstallApps {
-                Button {
-                    isShowingUninstallConfirmation = true
-                } label: {
-                    Text("Uninstall")
-                }
-                .disabled(
-                    viewModel.selectedIDs.isEmpty
-                        || viewModel.isScanning
-                        || viewModel.isLoadingDetails
-                        || viewModel.isCleaning
-                )
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .alert(
-                    "Uninstall Selected Apps?",
-                    isPresented: $isShowingUninstallConfirmation
-                ) {
-                    Button("Uninstall", role: .destructive) {
-                        viewModel.performCleanSelected()
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text(verbatim: uninstallConfirmationMessage)
-                }
-
-                if !viewModel.selectedIDs.isEmpty {
-                    Text("Selected \(formatBytes(viewModel.selectedTotalBytes))")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
-            } else if viewModel.scanMode == .safeCleanup {
-                Button {
-                    viewModel.performCleanSelected()
-                } label: {
-                    Text("Clean")
-                }
-                .disabled(viewModel.selectedIDs.isEmpty || viewModel.isScanning || viewModel.isCleaning)
-                .buttonStyle(.borderedProminent)
-                if !viewModel.selectedIDs.isEmpty {
-                    Text("Selected \(formatBytes(viewModel.selectedTotalBytes))")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
-
-                Text("App cannot accurately determine deletable items. Please review carefully.")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            } else {
-                Text("Read-only analysis")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            if let versionURL = viewModel.newVersionURL, let url = URL(string: versionURL) {
-                Link("New Version Available", destination: url)
-                    .foregroundColor(.blue)
-                    .font(.system(size: 13))
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
-        .background(Color(NSColor.windowBackgroundColor))
-    }
-
-    private var uninstallConfirmationMessage: String {
-        let names = viewModel.selectedItemNames
-        let displayedNames = names.prefix(6).joined(separator: "\n")
-        let remainingCount = max(0, names.count - 6)
-        let remaining = remainingCount > 0
-            ? "\n" + String(localized: "…and \(remainingCount) more")
-            : ""
-        let heading = String(
-            localized: "The following apps and their matching files will be moved to Trash:"
-        )
-        let guidance = String(
-            localized: "Quit these apps first. Some containers may require Full Disk Access. Items remain recoverable until Trash is emptied."
-        )
-        return """
-        \(heading)
-
-        \(displayedNames)\(remaining)
-
-        \(guidance)
-        """
     }
 }
 
@@ -477,7 +509,6 @@ private struct SystemSearchField: NSViewRepresentable {
             onChange(field.stringValue)
         }
 
-        // The built-in cancel button clears the field without posting a text-change notification.
         @objc func searchFieldDidAct(_ sender: NSSearchField) {
             onChange(sender.stringValue)
         }
