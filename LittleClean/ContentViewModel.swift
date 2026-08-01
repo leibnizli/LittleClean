@@ -440,6 +440,11 @@ final class ContentViewModel: ObservableObject {
                         session.categories,
                         cleanedIDs: cleanedIDs
                     )
+                } else if cleaningMode == .safeCleanup {
+                    session.categories = self.prunedEmptyCleanedCategories(
+                        session.categories,
+                        cleanedIDs: cleanedIDs
+                    )
                 }
             }
         }
@@ -455,6 +460,29 @@ final class ContentViewModel: ObservableObject {
             }
             let expanded = NSString(string: item.pathDescription).expandingTildeInPath
             return FileManager.default.fileExists(atPath: expanded)
+        }
+    }
+
+    /// Drops cleaned leaves that are now empty, and parents left without children.
+    private func prunedEmptyCleanedCategories(
+        _ items: [CategoryItem],
+        cleanedIDs: Set<UUID>
+    ) -> [CategoryItem] {
+        items.compactMap { item -> CategoryItem? in
+            if let children = item.children, !children.isEmpty {
+                let newChildren = prunedEmptyCleanedCategories(children, cleanedIDs: cleanedIDs)
+                guard !newChildren.isEmpty else { return nil }
+                var rebuilt = item
+                rebuilt.children = newChildren
+                let total = newChildren.reduce(Int64(0)) { $0 + $1.sizeBytes }
+                rebuilt.sizeBytes = total
+                rebuilt.sizeString = total > 0 ? formatBytes(total) : ""
+                return rebuilt
+            }
+            if cleanedIDs.contains(item.id), item.sizeBytes <= 0 {
+                return nil
+            }
+            return item
         }
     }
 

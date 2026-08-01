@@ -364,6 +364,10 @@ private nonisolated final class InstalledAppIndex: @unchecked Sendable {
         return resolved
     }
 
+    private static let bundleIdentifierBuildVariants = [
+        "debug", "beta", "alpha", "dev", "development", "staging"
+    ]
+
     private static func resolveOwningApp(_ candidate: String) -> Bool {
         var components = candidate.split(separator: ".").map(String.init)
 
@@ -376,9 +380,20 @@ private nonisolated final class InstalledAppIndex: @unchecked Sendable {
 
         // Extension and helper identifiers extend the owning app's id with extra
         // components ("com.foo.Bar.ShareExtension"), so walk back toward the app.
+        // Also try common Xcode build variants: a widget may keep the release id
+        // (com.foo.Bar.Widget) while only com.foo.Bar.debug is installed from DerivedData.
         while components.count >= 2 {
-            if isRegistered(components.joined(separator: ".")) {
+            let base = components.joined(separator: ".")
+            if isRegistered(base) {
                 return true
+            }
+            for variant in bundleIdentifierBuildVariants {
+                if components.last?.lowercased() == variant {
+                    continue
+                }
+                if isRegistered("\(base).\(variant)") {
+                    return true
+                }
             }
             components.removeLast()
         }
