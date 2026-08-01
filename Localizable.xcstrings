@@ -147,17 +147,6 @@
         }
       }
     },
-    "Calculating sizes…" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在计算大小…"
-          }
-        }
-      }
-    },
     "Cancel" : {
 
     },
@@ -220,16 +209,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "深度分析以只读方式显示安全清理范围外的内容，此模式下不会删除任何项目。"
-          }
-        }
-      }
-    },
-    "LittleClean refuses to remove itself or a protected system application." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "LittleClean 不会删除自身或受保护的系统应用。"
           }
         }
       }
@@ -335,7 +314,6 @@
       }
     },
     "LittleClean refuses to remove itself or a protected system application." : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -375,6 +353,7 @@
 
     },
     "Moves each app and confidently matched user data to Trash." : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -457,17 +436,6 @@
         }
       }
     },
-    "Permanently deletes each app and confidently matched user data." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "永久删除应用及已可靠匹配的用户数据。"
-          }
-        }
-      }
-    },
     "Preferences" : {
       "localizations" : {
         "zh-Hans" : {
@@ -484,17 +452,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请先退出这些应用。部分容器可能需要完全磁盘访问权限。清空废纸篓前仍可恢复这些项目。"
-          }
-        }
-      }
-    },
-    "Quit these apps first. Some containers may require Full Disk Access. This action cannot be undone." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请先退出这些应用。部分容器可能需要完全磁盘访问权限。此操作无法撤销。"
           }
         }
       }
@@ -678,17 +635,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "以下应用及其匹配文件将被移到废纸篓："
-          }
-        }
-      }
-    },
-    "The following apps and their matching files will be permanently deleted:" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "以下应用及其匹配文件将被永久删除："
           }
         }
       }

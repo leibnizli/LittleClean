@@ -381,10 +381,6 @@ struct ContentView: View {
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
-
-                Text("Moves each app and confidently matched user data to Trash.")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
             } else if viewModel.scanMode == .safeCleanup {
                 Button {
                     viewModel.performCleanSelected()
