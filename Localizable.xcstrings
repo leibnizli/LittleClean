@@ -619,12 +619,12 @@
         }
       }
     },
-    "The application is running. Quit it completely, then try again." : {
+    "Could not quit the application. Quit it completely, then try again." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "该应用正在运行。请完全退出后重试。"
+            "value" : "无法退出该应用。请完全退出后重试。"
           }
         }
       }

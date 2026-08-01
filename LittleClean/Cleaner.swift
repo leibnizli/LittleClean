@@ -183,21 +183,82 @@ nonisolated struct Cleaner: Sendable {
                 )
             }
 
-            if let bundleIdentifier = Bundle(url: appURL)?.bundleIdentifier,
-               !NSRunningApplication.runningApplications(
-                withBundleIdentifier: bundleIdentifier
-               ).isEmpty {
+            if !quitRunningApplications(for: appURL) {
                 return CleanFailure(
                     path: appPath,
                     domain: "LittleClean",
                     code: 2,
                     reason: String(
-                        localized: "The application is running. Quit it completely, then try again."
+                        localized: "Could not quit the application. Quit it completely, then try again."
                     )
                 )
             }
         }
         return nil
+    }
+
+    private func quitRunningApplications(for appURL: URL) -> Bool {
+        var running = runningApplications(for: appURL)
+        guard !running.isEmpty else { return true }
+
+        for app in running {
+            app.terminate()
+        }
+        if waitUntilTerminated(running, timeout: 2.0) { return true }
+
+        running = runningApplications(for: appURL)
+        for app in running {
+            app.forceTerminate()
+        }
+        return waitUntilTerminated(running, timeout: 2.0)
+    }
+
+    private func runningApplications(for appURL: URL) -> [NSRunningApplication] {
+        let standardizedPath = appURL.standardizedFileURL.path
+        let resolvedPath = appURL.resolvingSymlinksInPath().standardizedFileURL.path
+        var seen = Set<pid_t>()
+        var result: [NSRunningApplication] = []
+
+        func append(_ app: NSRunningApplication) {
+            guard !app.isTerminated, seen.insert(app.processIdentifier).inserted else { return }
+            result.append(app)
+        }
+
+        if let bundleIdentifier = Bundle(url: appURL)?.bundleIdentifier {
+            for app in NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier) {
+                append(app)
+            }
+        }
+
+        for app in NSWorkspace.shared.runningApplications {
+            guard let path = app.bundleURL?.standardizedFileURL.path else { continue }
+            if path == standardizedPath
+                || path == resolvedPath
+                || path.hasPrefix(standardizedPath + "/")
+                || path.hasPrefix(resolvedPath + "/") {
+                append(app)
+            }
+        }
+        return result
+    }
+
+    private func waitUntilTerminated(
+        _ apps: [NSRunningApplication],
+        timeout: TimeInterval
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if apps.allSatisfy(\.isTerminated)
+                || apps.allSatisfy({ app in
+                    !NSWorkspace.shared.runningApplications.contains {
+                        $0.processIdentifier == app.processIdentifier
+                    }
+                }) {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return apps.allSatisfy(\.isTerminated)
     }
 
     private func isApplePlatformSystemApplication(at appURL: URL) -> Bool {
