@@ -4,7 +4,7 @@
 
 LittleClean is a powerful and intelligent macOS cleaner and developer tool manager. It helps you reclaim valuable disk space by completely uninstalling unwanted applications and safely removing caches, logs, and leftovers, while also providing deep visibility into installed development tools and environments.
 
-<img alt="Image" src="https://github.com/user-attachments/assets/cb2c8bd6-1722-488a-86ed-078d96868c5d" />
+<img alt="Image" src="https://github.com/user-attachments/assets/a9de2785-cfce-4c84-b858-66c701e63942" />
 
 ## Installation
 
