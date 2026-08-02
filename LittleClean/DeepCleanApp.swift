@@ -15,6 +15,7 @@ struct LittleCleanApp: App {
         WindowGroup {
             ContentView()
         }
+        .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             CommandGroup(replacing: .help) {
                 Link("Website", destination: URL(string: "https://arayofsunshine.dev/")!)

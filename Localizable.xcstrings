@@ -193,6 +193,16 @@
     "Continue" : {
 
     },
+    "Could not quit the application. Quit it completely, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法退出该应用。请完全退出后重试。"
+          }
+        }
+      }
+    },
     "Deep Analysis" : {
       "localizations" : {
         "zh-Hans" : {
@@ -351,17 +361,6 @@
     },
     "Mode" : {
 
-    },
-    "Moves each app and confidently matched user data to Trash." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "将应用及已可靠匹配的用户数据移到废纸篓。"
-          }
-        }
-      }
     },
     "New Version Available" : {
       "localizations" : {
@@ -615,16 +614,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "必须包含应用本体。"
-          }
-        }
-      }
-    },
-    "Could not quit the application. Quit it completely, then try again." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法退出该应用。请完全退出后重试。"
           }
         }
       }
