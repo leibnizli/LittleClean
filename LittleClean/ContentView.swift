@@ -417,7 +417,8 @@ private struct ModeListPane: View {
 
             TableColumn("Size", value: \.sizeBytes) { item in
                 Group {
-                    if item.sizeString.isEmpty, session.isLoadingDetails {
+                    if item.sizeString.isEmpty,
+                       session.isLoadingDetails || session.isScanning {
                         ProgressView()
                             .controlSize(.small)
                     } else {

@@ -94,20 +94,55 @@ final class ContentViewModel: ObservableObject {
         loadRealDiskSpace()
 
         let scanner = scanner
+        if targetMode == .uninstallApps {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let result = scanner.scanCategories(mode: targetMode)
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    let session = self.session(for: targetMode)
+                    guard token == session.scanToken else { return }
+                    session.categories = result.categories
+                    session.isScanning = false
+                    session.hasLoaded = true
+                    self.loadUninstallEnrichment(session: session, scanToken: token)
+                }
+            }
+            return
+        }
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = scanner.scanCategories(mode: targetMode)
+            scanner.scanCategoriesIncremental(
+                mode: targetMode,
+                deferSizes: true
+            ) { update in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    let session = self.session(for: targetMode)
+                    guard token == session.scanToken else { return }
+                    for item in update.items {
+                        if let index = session.categories.firstIndex(where: {
+                            $0.name == item.name
+                                && $0.pathDescription == item.pathDescription
+                        }) {
+                            session.categories[index] = item
+                        } else {
+                            session.categories.append(item)
+                        }
+                    }
+                    self.objectWillChange.send()
+                }
+            }
             DispatchQueue.main.async {
                 guard let self else { return }
                 let session = self.session(for: targetMode)
                 guard token == session.scanToken else { return }
-                session.categories = result.categories
                 session.isScanning = false
                 session.hasLoaded = true
-                if targetMode == .deepAnalysis {
-                    self.loadDetails(session: session, scanToken: token)
-                } else if targetMode == .uninstallApps {
-                    self.loadUninstallEnrichment(session: session, scanToken: token)
-                }
+                self.loadPendingCategorySizes(
+                    session: session,
+                    scanToken: token,
+                    continueWithDeepDetails: targetMode == .deepAnalysis
+                )
             }
         }
     }
@@ -284,6 +319,66 @@ final class ContentViewModel: ObservableObject {
             .map(\.id)
     }
 
+    private func loadPendingCategorySizes(
+        session: ScanModeSession,
+        scanToken: Int,
+        continueWithDeepDetails: Bool
+    ) {
+        session.detailsLoadToken += 1
+        let token = session.detailsLoadToken
+        let pendingItems = session.categories.filter { FileSystemScanner.containsPendingSizes($0) }
+
+        guard !pendingItems.isEmpty else {
+            if continueWithDeepDetails {
+                loadDetails(session: session, scanToken: scanToken)
+            }
+            return
+        }
+
+        session.isLoadingDetails = true
+        let scanner = scanner
+        let group = DispatchGroup()
+
+        for item in pendingItems {
+            group.enter()
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let measured = scanner.measurePendingSizes(item)
+                let finalized = scanner.finalizeMeasuredCategory(measured)
+                DispatchQueue.main.async {
+                    defer { group.leave() }
+                    guard let self else { return }
+                    guard token == session.detailsLoadToken,
+                          scanToken == session.scanToken,
+                          !session.isScanning else { return }
+                    if let index = session.categories.firstIndex(where: {
+                        $0.name == item.name
+                            && $0.pathDescription == item.pathDescription
+                    }) {
+                        if let finalized {
+                            session.categories[index] = finalized
+                        } else {
+                            session.categories.remove(at: index)
+                        }
+                        self.objectWillChange.send()
+                    }
+                }
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            guard let self else { return }
+            guard token == session.detailsLoadToken,
+                  scanToken == session.scanToken,
+                  !session.isScanning else { return }
+            if continueWithDeepDetails {
+                self.loadDetails(session: session, scanToken: scanToken)
+            } else {
+                session.isLoadingDetails = false
+                self.objectWillChange.send()
+            }
+        }
+    }
+
     private func loadDetails(session: ScanModeSession, scanToken: Int) {
         session.detailsLoadToken += 1
         let token = session.detailsLoadToken
@@ -296,6 +391,7 @@ final class ContentViewModel: ObservableObject {
             group.enter()
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 let measured = scanner.measurePendingSizes(item)
+                let finalized = scanner.finalizeMeasuredCategory(measured)
                 DispatchQueue.main.async {
                     defer { group.leave() }
                     guard let self else { return }
@@ -303,10 +399,14 @@ final class ContentViewModel: ObservableObject {
                           scanToken == session.scanToken,
                           !session.isScanning else { return }
                     if let index = session.categories.firstIndex(where: {
-                        $0.name == measured.name
-                            && $0.pathDescription == measured.pathDescription
+                        $0.name == item.name
+                            && $0.pathDescription == item.pathDescription
                     }) {
-                        session.categories[index] = measured
+                        if let finalized {
+                            session.categories[index] = finalized
+                        } else {
+                            session.categories.remove(at: index)
+                        }
                         self.objectWillChange.send()
                     }
                 }

@@ -909,6 +909,11 @@ nonisolated struct CategoryScanResult: Sendable {
     let containerAccessDenied: Bool
 }
 
+nonisolated struct CategoryScanUpdate: Sendable {
+    let items: [CategoryItem]
+    let containerAccessDenied: Bool
+}
+
 nonisolated struct DetailScanResult: Sendable {
     let items: [CategoryItem]
     let containerAccessDenied: Bool
@@ -923,62 +928,162 @@ nonisolated struct FileSystemScanner: Sendable {
 
         var foundCategories: [CategoryItem] = []
         var containerAccessDenied = false
-        let fileManager = FileManager.default
-
-        for rule in CleanConfig.defaultRules where rule.scanMode == mode {
-            let expandedPath = NSString(string: rule.pathDescription).expandingTildeInPath
-            var isDirectory: ObjCBool = false
-
-            if rule.isDynamicSimulatorRule {
-                foundCategories.append(contentsOf: scanSimulatorVersions(basePath: rule.pathDescription))
-            } else if rule.isDynamicUnavailableSimulatorRule {
-                foundCategories.append(contentsOf: scanUnavailableSimulators(basePath: rule.pathDescription))
-            } else if rule.isDynamicLeftoversRule {
-                foundCategories.append(contentsOf: scanAppLeftovers(basePath: rule.pathDescription))
-            } else if rule.isDynamicContainerLeftoversRule {
-                let result = scanContainerLeftovers(basePath: rule.pathDescription)
-                foundCategories.append(contentsOf: result.items)
-                containerAccessDenied = result.accessDenied
-            } else if rule.isDynamicHomeCleanupRule {
-                let allChildren = scanHomeCaches(basePath: rule.pathDescription)
-
-                if !allChildren.isEmpty {
-                    let totalBytes = allChildren.reduce(0) { $0 + $1.sizeBytes }
-                    var parent = CategoryItem(
-                        name: rule.name,
-                        pathDescription: rule.pathDescription,
-                        iconName: rule.iconName,
-                        iconColor: rule.iconColor,
-                        sizeBytes: totalBytes,
-                        sizeString: formatBytes(totalBytes),
-                        rule: rule,
-                        children: allChildren
-                    )
-                    parent.displayPath = "~ (Caches)"
-                    foundCategories.append(parent)
-                }
-            } else if fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) {
-                let totalBytes = calculateDirectorySize(at: expandedPath, isDirectory: isDirectory.boolValue)
-                let item = CategoryItem(
-                    name: rule.name,
-                    pathDescription: rule.pathDescription,
-                    iconName: rule.iconName,
-                    iconColor: rule.iconColor,
-                    sizeBytes: totalBytes,
-                    sizeString: formatBytes(totalBytes),
-                    rule: rule
-                )
-                foundCategories.append(item)
-            }
+        let lock = NSLock()
+        scanCategoriesIncremental(mode: mode, deferSizes: false) { update in
+            lock.lock()
+            foundCategories.append(contentsOf: update.items)
+            containerAccessDenied = containerAccessDenied || update.containerAccessDenied
+            lock.unlock()
         }
-
-        let categories = mode == .deepAnalysis
-            ? foundCategories.map(makeReadOnly)
-            : foundCategories
         return CategoryScanResult(
-            categories: categories,
+            categories: foundCategories,
             containerAccessDenied: containerAccessDenied
         )
+    }
+
+    // Parallel per-rule scan. With deferSizes, items appear quickly with pendingSizePaths
+    // for later measurePendingSizes; otherwise sizes are computed inline.
+    func scanCategoriesIncremental(
+        mode: ScanMode,
+        deferSizes: Bool,
+        onUpdate: @escaping @Sendable (CategoryScanUpdate) -> Void
+    ) {
+        if mode == .uninstallApps {
+            let result = scanInstalledApplicationsForUninstall()
+            onUpdate(
+                CategoryScanUpdate(
+                    items: result.categories,
+                    containerAccessDenied: result.containerAccessDenied
+                )
+            )
+            return
+        }
+
+        let rules = CleanConfig.defaultRules.filter { $0.scanMode == mode }
+        let group = DispatchGroup()
+        let queue = DispatchQueue(
+            label: "littleclean.categories",
+            qos: .userInitiated,
+            attributes: .concurrent
+        )
+
+        for rule in rules {
+            group.enter()
+            queue.async {
+                defer { group.leave() }
+                let scanned = self.scanRule(rule, deferSizes: deferSizes)
+                var items = scanned.items
+                if mode == .deepAnalysis {
+                    items = items.map(self.makeReadOnly)
+                }
+                guard !items.isEmpty || scanned.accessDenied else { return }
+                onUpdate(
+                    CategoryScanUpdate(
+                        items: items,
+                        containerAccessDenied: scanned.accessDenied
+                    )
+                )
+            }
+        }
+        group.wait()
+    }
+
+    private func scanRule(
+        _ rule: CleanRule,
+        deferSizes: Bool
+    ) -> (items: [CategoryItem], accessDenied: Bool) {
+        let expandedPath = NSString(string: rule.pathDescription).expandingTildeInPath
+        var isDirectory: ObjCBool = false
+        let fileManager = FileManager.default
+
+        if rule.isDynamicSimulatorRule {
+            return (scanSimulatorVersions(basePath: rule.pathDescription), false)
+        }
+        if rule.isDynamicUnavailableSimulatorRule {
+            return (
+                scanUnavailableSimulators(basePath: rule.pathDescription, deferSizes: deferSizes),
+                false
+            )
+        }
+        if rule.isDynamicLeftoversRule {
+            return (scanAppLeftovers(basePath: rule.pathDescription, deferSizes: deferSizes), false)
+        }
+        if rule.isDynamicContainerLeftoversRule {
+            return scanContainerLeftovers(basePath: rule.pathDescription, deferSizes: deferSizes)
+        }
+        if rule.isDynamicHomeCleanupRule {
+            let allChildren = scanHomeCaches(basePath: rule.pathDescription, deferSizes: deferSizes)
+            guard !allChildren.isEmpty else { return ([], false) }
+            let totalBytes = allChildren.reduce(Int64(0)) { $0 + $1.sizeBytes }
+            var parent = CategoryItem(
+                name: rule.name,
+                pathDescription: rule.pathDescription,
+                iconName: rule.iconName,
+                iconColor: rule.iconColor,
+                sizeBytes: totalBytes,
+                sizeString: totalBytes > 0 ? formatBytes(totalBytes) : "",
+                rule: rule,
+                children: allChildren
+            )
+            parent.displayPath = "~ (Caches)"
+            return ([parent], false)
+        }
+        guard fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) else {
+            return ([], false)
+        }
+        if deferSizes {
+            let item = CategoryItem(
+                name: rule.name,
+                pathDescription: rule.pathDescription,
+                iconName: rule.iconName,
+                iconColor: rule.iconColor,
+                sizeBytes: 0,
+                sizeString: "",
+                rule: rule,
+                pendingSizePaths: [expandedPath]
+            )
+            return ([item], false)
+        }
+        let totalBytes = calculateDirectorySize(
+            at: expandedPath,
+            isDirectory: isDirectory.boolValue
+        )
+        let item = CategoryItem(
+            name: rule.name,
+            pathDescription: rule.pathDescription,
+            iconName: rule.iconName,
+            iconColor: rule.iconColor,
+            sizeBytes: totalBytes,
+            sizeString: formatBytes(totalBytes),
+            rule: rule
+        )
+        return ([item], false)
+    }
+
+    // Drop trivial entries after lazy sizing (home caches / unavailable simulators).
+    func finalizeMeasuredCategory(_ item: CategoryItem) -> CategoryItem? {
+        let minBytes: Int64 = 1_000_000
+        if item.rule.isDynamicHomeCleanupRule || item.rule.isDynamicUnavailableSimulatorRule {
+            let children = (item.children ?? []).filter { $0.sizeBytes > minBytes }
+            guard !children.isEmpty else { return nil }
+            var result = item
+            result.children = children.sorted { $0.sizeBytes > $1.sizeBytes }
+            let total = children.reduce(Int64(0)) { $0 + $1.sizeBytes }
+            result.sizeBytes = total
+            result.sizeString = formatBytes(total)
+            return result
+        }
+        if item.rule.isDynamicLeftoversRule || item.rule.isDynamicContainerLeftoversRule,
+           var children = item.children, !children.isEmpty {
+            children.sort { $0.sizeBytes > $1.sizeBytes }
+            var result = item
+            result.children = children
+            let total = children.reduce(Int64(0)) { $0 + $1.sizeBytes }
+            result.sizeBytes = total
+            result.sizeString = total > 0 ? formatBytes(total) : ""
+            return result
+        }
+        return item
     }
 
     // Fast first paint: list apps with only the .app bundle as a child. Related files
@@ -1694,7 +1799,10 @@ nonisolated struct FileSystemScanner: Sendable {
     }
 
     // Detect simulator devices whose runtime is no longer installed (unavailable)
-    private func scanUnavailableSimulators(basePath: String) -> [CategoryItem] {
+    private func scanUnavailableSimulators(
+        basePath: String,
+        deferSizes: Bool = false
+    ) -> [CategoryItem] {
         // Availability is not stored in device.plist; ask simctl via JSON output.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
@@ -1738,10 +1846,16 @@ nonisolated struct FileSystemScanner: Sendable {
 
                 let devicePath = (devicesBasePath as NSString).appendingPathComponent(udid)
                 var isDir: ObjCBool = false
-                guard fileManager.fileExists(atPath: devicePath, isDirectory: &isDir), isDir.boolValue else { continue }
+                guard fileManager.fileExists(atPath: devicePath, isDirectory: &isDir),
+                      isDir.boolValue else { continue }
 
-                let bytes = calculateDirectorySize(at: devicePath, isDirectory: true)
-                guard bytes > 1_000_000 else { continue } // skip trivial device folders
+                let bytes: Int64
+                if deferSizes {
+                    bytes = 0
+                } else {
+                    bytes = calculateDirectorySize(at: devicePath, isDirectory: true)
+                    guard bytes > 1_000_000 else { continue } // skip trivial device folders
+                }
 
                 totalBytes += bytes
                 let deviceName = (device["name"] as? String) ?? udid
@@ -1752,7 +1866,10 @@ nonisolated struct FileSystemScanner: Sendable {
                     pathDescription: displayPath,
                     iconName: "iphone.slash",
                     iconColor: .red,
-                    cleanType: .runCommand(executable: "/usr/bin/xcrun", args: ["simctl", "delete", udid]),
+                    cleanType: .runCommand(
+                        executable: "/usr/bin/xcrun",
+                        args: ["simctl", "delete", udid]
+                    ),
                     note: "Unavailable"
                 )
                 let item = CategoryItem(
@@ -1761,8 +1878,9 @@ nonisolated struct FileSystemScanner: Sendable {
                     iconName: "iphone.slash",
                     iconColor: .red,
                     sizeBytes: bytes,
-                    sizeString: formatBytes(bytes),
-                    rule: rule
+                    sizeString: bytes > 0 ? formatBytes(bytes) : "",
+                    rule: rule,
+                    pendingSizePaths: deferSizes ? [devicePath] : nil
                 )
                 childItems.append(item)
             }
@@ -1770,7 +1888,9 @@ nonisolated struct FileSystemScanner: Sendable {
 
         guard !childItems.isEmpty else { return [] }
 
-        childItems.sort { $0.sizeBytes > $1.sizeBytes }
+        if !deferSizes {
+            childItems.sort { $0.sizeBytes > $1.sizeBytes }
+        }
 
         let parentRule = CleanRule(
             name: "Unavailable Simulators",
@@ -1779,6 +1899,7 @@ nonisolated struct FileSystemScanner: Sendable {
             iconColor: .red,
             cleanType: .none,
             note: "Missing Runtime",
+            isDynamicUnavailableSimulatorRule: true,
             isCheckboxHidden: true
         )
         let parent = CategoryItem(
@@ -1787,7 +1908,7 @@ nonisolated struct FileSystemScanner: Sendable {
             iconName: parentRule.iconName,
             iconColor: parentRule.iconColor,
             sizeBytes: totalBytes,
-            sizeString: formatBytes(totalBytes),
+            sizeString: totalBytes > 0 ? formatBytes(totalBytes) : "",
             rule: parentRule,
             children: childItems
         )
@@ -2311,7 +2432,10 @@ nonisolated struct FileSystemScanner: Sendable {
     }
 
     // Dynamically scan for folders in Application Support that belong to UNINSTALLED applications
-    private func scanAppLeftovers(basePath: String) -> [CategoryItem] {
+    private func scanAppLeftovers(
+        basePath: String,
+        deferSizes: Bool = false
+    ) -> [CategoryItem] {
         let expandedBasePath = NSString(string: basePath).expandingTildeInPath
         let fileManager = FileManager.default
         guard let subfolders = try? fileManager.contentsOfDirectory(atPath: expandedBasePath) else {
@@ -2342,7 +2466,12 @@ nonisolated struct FileSystemScanner: Sendable {
             }
 
             // 3. Check if folder matches any installed application
-            let isAppInstalled = folderMatchesInstalledApp(folder, lowerFolder: lowerFolder, normalizedFolder: normalizedFolder, installedApps: installedApps)
+            let isAppInstalled = folderMatchesInstalledApp(
+                folder,
+                lowerFolder: lowerFolder,
+                normalizedFolder: normalizedFolder,
+                installedApps: installedApps
+            )
 
             // If the app is currently installed, SKIP IT (Not a leftover!)
             if isAppInstalled {
@@ -2352,8 +2481,11 @@ nonisolated struct FileSystemScanner: Sendable {
             let fullPath = (expandedBasePath as NSString).appendingPathComponent(folder)
             var isDirectory: ObjCBool = false
 
-            if fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) && isDirectory.boolValue {
-                let sizeBytes = calculateDirectorySize(at: fullPath, isDirectory: true)
+            if fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory),
+               isDirectory.boolValue {
+                let sizeBytes = deferSizes
+                    ? Int64(0)
+                    : calculateDirectorySize(at: fullPath, isDirectory: true)
                 totalBytes += sizeBytes
                 let displayPath = "\(basePath)/\(folder)"
                 let childRule = CleanRule(
@@ -2371,8 +2503,9 @@ nonisolated struct FileSystemScanner: Sendable {
                     iconName: childRule.iconName,
                     iconColor: childRule.iconColor,
                     sizeBytes: sizeBytes,
-                    sizeString: formatBytes(sizeBytes),
-                    rule: childRule
+                    sizeString: sizeBytes > 0 ? formatBytes(sizeBytes) : "",
+                    rule: childRule,
+                    pendingSizePaths: deferSizes ? [fullPath] : nil
                 )
                 childItems.append(childItem)
             }
@@ -2389,6 +2522,7 @@ nonisolated struct FileSystemScanner: Sendable {
             iconColor: .pink,
             cleanType: .none,
             note: "App Leftovers",
+            isDynamicLeftoversRule: true,
             isCheckboxHidden: true
         )
 
@@ -2398,7 +2532,7 @@ nonisolated struct FileSystemScanner: Sendable {
             iconName: parentRule.iconName,
             iconColor: parentRule.iconColor,
             sizeBytes: totalBytes,
-            sizeString: formatBytes(totalBytes),
+            sizeString: totalBytes > 0 ? formatBytes(totalBytes) : "",
             rule: parentRule,
             children: childItems
         )
@@ -2414,7 +2548,10 @@ nonisolated struct FileSystemScanner: Sendable {
     // plist is read so UUID-named containers resolve correctly. com.apple.* system
     // containers are always skipped. Remaining containers whose bundle id matches
     // no installed app (or its extensions) are listed as cleanable leftovers.
-    private func scanContainerLeftovers(basePath: String) -> (items: [CategoryItem], accessDenied: Bool) {
+    private func scanContainerLeftovers(
+        basePath: String,
+        deferSizes: Bool = false
+    ) -> (items: [CategoryItem], accessDenied: Bool) {
         let expandedBasePath = NSString(string: basePath).expandingTildeInPath
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(atPath: expandedBasePath) else {
@@ -2429,15 +2566,21 @@ nonisolated struct FileSystemScanner: Sendable {
         for entry in entries {
             let fullPath = (expandedBasePath as NSString).appendingPathComponent(entry)
             var isDir: ObjCBool = false
-            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue else { continue }
+            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir),
+                  isDir.boolValue else { continue }
 
             // Resolve the owning bundle id from the container manager metadata plist,
             // falling back to the folder name. UUID-named containers rely on the plist.
-            let metadataPlist = (fullPath as NSString).appendingPathComponent(".com.apple.containermanagerd.metadata.plist")
+            let metadataPlist = (fullPath as NSString)
+                .appendingPathComponent(".com.apple.containermanagerd.metadata.plist")
             var bundleID = entry
             do {
                 let data = try Data(contentsOf: URL(fileURLWithPath: metadataPlist))
-                if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+                if let plist = try? PropertyListSerialization.propertyList(
+                    from: data,
+                    options: [],
+                    format: nil
+                ) as? [String: Any],
                    let identifier = plist["MCMMetadataIdentifier"] as? String,
                    !identifier.isEmpty {
                     bundleID = identifier
@@ -2466,11 +2609,18 @@ nonisolated struct FileSystemScanner: Sendable {
             // installed. Extension containers (e.g. "com.foo.app.ShareExtension") and
             // team-id-prefixed containers match via substring against the app bundle id.
             let normalizedBundle = normalizeString(bundleID)
-            if folderMatchesInstalledApp(bundleID, lowerFolder: lowerBundle, normalizedFolder: normalizedBundle, installedApps: installedApps) {
+            if folderMatchesInstalledApp(
+                bundleID,
+                lowerFolder: lowerBundle,
+                normalizedFolder: normalizedBundle,
+                installedApps: installedApps
+            ) {
                 continue
             }
 
-            let sizeBytes = calculateDirectorySize(at: fullPath, isDirectory: true)
+            let sizeBytes = deferSizes
+                ? Int64(0)
+                : calculateDirectorySize(at: fullPath, isDirectory: true)
             totalBytes += sizeBytes
             let displayPath = "\(basePath)/\(entry)"
             // A container's contents live under Data/, which is the app's redirected home.
@@ -2481,7 +2631,8 @@ nonisolated struct FileSystemScanner: Sendable {
                 iconName: "shippingbox.fill",
                 iconColor: .pink,
                 cleanType: .deleteDirectoryTree,
-                note: describeDirectoryContents(at: dataPath) ?? describeDirectoryContents(at: fullPath)
+                note: describeDirectoryContents(at: dataPath)
+                    ?? describeDirectoryContents(at: fullPath)
             )
 
             let childItem = CategoryItem(
@@ -2490,15 +2641,18 @@ nonisolated struct FileSystemScanner: Sendable {
                 iconName: childRule.iconName,
                 iconColor: childRule.iconColor,
                 sizeBytes: sizeBytes,
-                sizeString: formatBytes(sizeBytes),
-                rule: childRule
+                sizeString: sizeBytes > 0 ? formatBytes(sizeBytes) : "",
+                rule: childRule,
+                pendingSizePaths: deferSizes ? [fullPath] : nil
             )
             childItems.append(childItem)
         }
 
         guard !childItems.isEmpty else { return ([], false) }
 
-        childItems.sort { $0.sizeBytes > $1.sizeBytes }
+        if !deferSizes {
+            childItems.sort { $0.sizeBytes > $1.sizeBytes }
+        }
 
         let parentRule = CleanRule(
             name: String(localized: "Container Leftovers"),
@@ -2507,6 +2661,7 @@ nonisolated struct FileSystemScanner: Sendable {
             iconColor: .pink,
             cleanType: .none,
             note: "Container Leftovers",
+            isDynamicContainerLeftoversRule: true,
             isCheckboxHidden: true
         )
 
@@ -2516,7 +2671,7 @@ nonisolated struct FileSystemScanner: Sendable {
             iconName: parentRule.iconName,
             iconColor: parentRule.iconColor,
             sizeBytes: totalBytes,
-            sizeString: formatBytes(totalBytes),
+            sizeString: totalBytes > 0 ? formatBytes(totalBytes) : "",
             rule: parentRule,
             children: childItems
         )
@@ -2685,7 +2840,10 @@ nonisolated struct FileSystemScanner: Sendable {
     }
 
     // Scan known tool cache locations under the home directory
-    private func scanHomeCaches(basePath: String) -> [CategoryItem] {
+    private func scanHomeCaches(
+        basePath: String,
+        deferSizes: Bool = false
+    ) -> [CategoryItem] {
         let home = NSHomeDirectory()
         let fileManager = FileManager.default
 
@@ -2709,17 +2867,21 @@ nonisolated struct FileSystemScanner: Sendable {
         ]
 
         var childItems: [CategoryItem] = []
-        var totalBytes: Int64 = 0
 
         for cache in knownCaches {
             let fullPath = (home as NSString).appendingPathComponent(cache.subpath)
             var isDir: ObjCBool = false
-            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue else { continue }
+            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir),
+                  isDir.boolValue else { continue }
 
-            let bytes = calculateDirectorySize(at: fullPath, isDirectory: true)
-            guard bytes > 1_000_000 else { continue } // skip trivial caches
+            let bytes: Int64
+            if deferSizes {
+                bytes = 0
+            } else {
+                bytes = calculateDirectorySize(at: fullPath, isDirectory: true)
+                guard bytes > 1_000_000 else { continue } // skip trivial caches
+            }
 
-            totalBytes += bytes
             let displayPath = "~/\(cache.subpath)"
             let rule = CleanRule(
                 name: cache.name,
@@ -2735,8 +2897,9 @@ nonisolated struct FileSystemScanner: Sendable {
                 iconName: cache.icon,
                 iconColor: cache.color,
                 sizeBytes: bytes,
-                sizeString: formatBytes(bytes),
-                rule: rule
+                sizeString: bytes > 0 ? formatBytes(bytes) : "",
+                rule: rule,
+                pendingSizePaths: deferSizes ? [fullPath] : nil
             )
             childItems.append(item)
         }
