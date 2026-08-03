@@ -27,6 +27,8 @@ nonisolated struct CategoryItem: Identifiable, @unchecked Sendable {
     var isSelectionDetail: Bool = false
     // The application bundle itself cannot be excluded from an uninstall plan.
     var isRequiredSelectionDetail: Bool = false
+    // Paths to measure later (e.g. simulator version groups listed before sizing).
+    var pendingSizePaths: [String]? = nil
 }
 
 nonisolated enum SelectionState {

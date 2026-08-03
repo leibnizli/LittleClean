@@ -417,9 +417,7 @@ private struct ModeListPane: View {
 
             TableColumn("Size", value: \.sizeBytes) { item in
                 Group {
-                    if item.isAtomicSelection,
-                       item.sizeString.isEmpty,
-                       session.isLoadingDetails {
+                    if item.sizeString.isEmpty, session.isLoadingDetails {
                         ProgressView()
                             .controlSize(.small)
                     } else {

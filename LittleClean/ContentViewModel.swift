@@ -289,54 +289,120 @@ final class ContentViewModel: ObservableObject {
         let token = session.detailsLoadToken
         session.isLoadingDetails = true
         let scanner = scanner
+        let pendingItems = session.categories.filter { FileSystemScanner.containsPendingSizes($0) }
+        let group = DispatchGroup()
 
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let detailResult = scanner.scanDetails()
-            DispatchQueue.main.async {
-                guard let self else { return }
-                guard token == session.detailsLoadToken,
-                      scanToken == session.scanToken,
-                      !session.isScanning else { return }
-                let detailItems = detailResult.items
-                let existingNames = Set(session.categories.filter(\.isDisplayOnly).map(\.name))
-                for detailItem in detailItems where !existingNames.contains(detailItem.name) {
-                    if detailItem.pathDescription == "~/Library/Application Support",
-                       let index = session.categories.firstIndex(where: {
-                           $0.pathDescription == detailItem.pathDescription && $0.children != nil
-                       }),
-                       let detailChildren = detailItem.children {
-                        let current = session.categories[index]
-                        let children = (current.children ?? []) + detailChildren
-                        let totalBytes = children.reduce(0) { $0 + $1.sizeBytes }
-                        let rule = CleanRule(
-                            name: "Application Support",
-                            pathDescription: detailItem.pathDescription,
-                            iconName: "folder.fill",
-                            iconColor: .blue,
-                            cleanType: .none,
-                            note: "App Data",
-                            isCheckboxHidden: true
-                        )
-                        session.categories[index] = CategoryItem(
-                            name: rule.name,
-                            pathDescription: rule.pathDescription,
-                            iconName: rule.iconName,
-                            iconColor: rule.iconColor,
-                            sizeBytes: totalBytes,
-                            sizeString: formatBytes(totalBytes),
-                            rule: rule,
-                            children: children,
-                            isDisplayOnly: true,
-                            finderPath: detailItem.finderPath ?? detailItem.pathDescription
-                        )
-                    } else {
-                        session.categories.append(detailItem)
+        for item in pendingItems {
+            group.enter()
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let measured = scanner.measurePendingSizes(item)
+                DispatchQueue.main.async {
+                    defer { group.leave() }
+                    guard let self else { return }
+                    guard token == session.detailsLoadToken,
+                          scanToken == session.scanToken,
+                          !session.isScanning else { return }
+                    if let index = session.categories.firstIndex(where: {
+                        $0.name == measured.name
+                            && $0.pathDescription == measured.pathDescription
+                    }) {
+                        session.categories[index] = measured
+                        self.objectWillChange.send()
                     }
                 }
-                session.isLoadingDetails = false
-                self.objectWillChange.send()
             }
         }
+
+        group.enter()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            scanner.scanDetailsIncremental { update in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    guard token == session.detailsLoadToken,
+                          scanToken == session.scanToken,
+                          !session.isScanning else { return }
+                    self.applyDetailUpdate(update, to: session)
+                }
+            }
+            DispatchQueue.main.async {
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            guard let self else { return }
+            guard token == session.detailsLoadToken,
+                  scanToken == session.scanToken,
+                  !session.isScanning else { return }
+            session.isLoadingDetails = false
+            self.objectWillChange.send()
+        }
+    }
+
+    private func applyDetailUpdate(
+        _ update: FileSystemScanner.DetailSectionUpdate,
+        to session: ScanModeSession
+    ) {
+        let sectionName: String
+        let sectionIcon: String
+        let sectionColor: Color
+        let sectionNote: LocalizedStringKey
+        switch update.section {
+        case .installedTools:
+            sectionName = "Installed Tools"
+            sectionIcon = "terminal.fill"
+            sectionColor = .primary
+            sectionNote = "Read Only"
+        case .homeDirectory:
+            sectionName = "Home Directory"
+            sectionIcon = "folder.fill"
+            sectionColor = .blue
+            sectionNote = "Non-system Items"
+        }
+
+        if let index = session.categories.firstIndex(where: {
+            $0.name == sectionName && $0.isDisplayOnly
+        }) {
+            var parent = session.categories[index]
+            var children = parent.children ?? []
+            if let childIndex = children.firstIndex(where: { $0.name == update.child.name }) {
+                children[childIndex] = update.child
+            } else {
+                children.append(update.child)
+            }
+            children.sort { $0.sizeBytes > $1.sizeBytes }
+            let total = children.reduce(Int64(0)) { $0 + $1.sizeBytes }
+            parent.children = children
+            parent.sizeBytes = total
+            parent.sizeString = total > 0 ? formatBytes(total) : ""
+            session.categories[index] = parent
+        } else {
+            session.categories.append(
+                CategoryItem(
+                    name: sectionName,
+                    pathDescription: sectionName,
+                    iconName: sectionIcon,
+                    iconColor: sectionColor,
+                    sizeBytes: update.child.sizeBytes,
+                    sizeString: update.child.sizeBytes > 0
+                        ? formatBytes(update.child.sizeBytes)
+                        : "",
+                    rule: CleanRule(
+                        name: sectionName,
+                        pathDescription: sectionName,
+                        iconName: sectionIcon,
+                        iconColor: sectionColor,
+                        cleanType: .none,
+                        note: sectionNote,
+                        isCheckboxHidden: true,
+                        scanMode: .deepAnalysis
+                    ),
+                    children: [update.child],
+                    isDisplayOnly: true
+                )
+            )
+        }
+        objectWillChange.send()
     }
 
     private func loadUninstallEnrichment(session: ScanModeSession, scanToken: Int) {

@@ -1364,25 +1364,230 @@ nonisolated struct FileSystemScanner: Sendable {
             description: item.description,
             isAtomicSelection: item.isAtomicSelection,
             isSelectionDetail: item.isSelectionDetail,
-            isRequiredSelectionDetail: item.isRequiredSelectionDetail
+            isRequiredSelectionDetail: item.isRequiredSelectionDetail,
+            pendingSizePaths: item.pendingSizePaths
         )
+    }
+
+    nonisolated enum DetailSectionKind: Sendable {
+        case installedTools
+        case homeDirectory
+    }
+
+    nonisolated struct DetailSectionUpdate: Sendable {
+        let section: DetailSectionKind
+        let child: CategoryItem
+    }
+
+    // Build read-only informational sections, invoking onUpdate as each unit finishes.
+    func scanDetailsIncremental(
+        onUpdate: @escaping @Sendable (DetailSectionUpdate) -> Void
+    ) {
+        let coveredPaths = homeDirectoryEntryPaths()
+        let group = DispatchGroup()
+        let queue = DispatchQueue(
+            label: "littleclean.details",
+            qos: .utility,
+            attributes: .concurrent
+        )
+        let ownedLock = NSLock()
+        var ownedDirs = Set<String>()
+
+        func emitTool(_ item: CategoryItem?) {
+            guard let item else { return }
+            let filtered = filterHomeCoveredNodes([item], coveredPaths: coveredPaths)
+            guard let first = filtered.first else { return }
+            onUpdate(DetailSectionUpdate(section: .installedTools, child: first))
+        }
+
+        let dirs = nonSystemPathDirs()
+
+        group.enter()
+        queue.async {
+            defer { group.leave() }
+            let result = self.scanHomebrewTools(dirs: dirs)
+            ownedLock.lock()
+            ownedDirs.formUnion(result.ownedDirs)
+            ownedLock.unlock()
+            emitTool(result.item)
+        }
+
+        group.enter()
+        queue.async {
+            defer { group.leave() }
+            var localOwned = Set<String>()
+            let item = self.scanNodeInstalls(dirs: dirs, ownedDirs: &localOwned)
+            ownedLock.lock()
+            ownedDirs.formUnion(localOwned)
+            ownedLock.unlock()
+            emitTool(item)
+        }
+
+        group.enter()
+        queue.async {
+            defer { group.leave() }
+            let result = self.scanPnpmTools(dirs: dirs)
+            ownedLock.lock()
+            ownedDirs.formUnion(result.ownedDirs)
+            ownedLock.unlock()
+            emitTool(result.item)
+        }
+
+        group.enter()
+        queue.async {
+            defer { group.leave() }
+            let result = self.scanYarnTools(dirs: dirs)
+            ownedLock.lock()
+            ownedDirs.formUnion(result.ownedDirs)
+            ownedLock.unlock()
+            emitTool(result.item)
+        }
+
+        group.enter()
+        queue.async {
+            defer { group.leave() }
+            let result = self.scanCargoTools(dirs: dirs)
+            ownedLock.lock()
+            ownedDirs.formUnion(result.ownedDirs)
+            ownedLock.unlock()
+            emitTool(result.item)
+        }
+
+        group.enter()
+        queue.async {
+            defer { group.leave() }
+            emitTool(self.scanRubyGemsTools(dirs: dirs))
+        }
+
+        group.enter()
+        queue.async {
+            defer { group.leave() }
+            let result = self.scanGoTools(dirs: dirs)
+            ownedLock.lock()
+            ownedDirs.formUnion(result.ownedDirs)
+            ownedLock.unlock()
+            emitTool(result.item)
+        }
+
+        group.enter()
+        queue.async {
+            defer { group.leave() }
+            emitTool(self.scanPipxTools(dirs: dirs))
+        }
+
+        for entry in homeDirectoryEntries() {
+            group.enter()
+            queue.async {
+                defer { group.leave() }
+                if let item = self.scanHomeDirectoryEntry(entry) {
+                    onUpdate(DetailSectionUpdate(section: .homeDirectory, child: item))
+                }
+            }
+        }
+
+        group.wait()
+
+        ownedLock.lock()
+        let finalOwned = ownedDirs
+        ownedLock.unlock()
+        emitTool(scanOtherPathTools(dirs: dirs, ownedDirs: finalOwned))
     }
 
     // Build read-only informational sections synchronously on a background queue.
     func scanDetails() -> DetailScanResult {
-        let toolsItem = scanInstalledTools()
-        let homeItem = scanHomeDirectory()
-        let items = ([toolsItem, homeItem].compactMap { $0 }).filter {
-            guard let children = $0.children else { return false }
-            return !children.isEmpty
+        var toolChildren: [CategoryItem] = []
+        var homeChildren: [CategoryItem] = []
+        let lock = NSLock()
+        scanDetailsIncremental { update in
+            lock.lock()
+            defer { lock.unlock() }
+            switch update.section {
+            case .installedTools:
+                toolChildren.append(update.child)
+            case .homeDirectory:
+                homeChildren.append(update.child)
+            }
         }
-        return DetailScanResult(
-            items: items,
-            containerAccessDenied: false
-        )
+
+        var items: [CategoryItem] = []
+        if !toolChildren.isEmpty {
+            toolChildren.sort { $0.sizeBytes > $1.sizeBytes }
+            items.append(
+                displayParent(
+                    name: "Installed Tools",
+                    label: "Installed Tools",
+                    icon: "terminal.fill",
+                    color: .primary,
+                    note: "Read Only",
+                    children: toolChildren
+                )
+            )
+        }
+        if !homeChildren.isEmpty {
+            homeChildren.sort { $0.sizeBytes > $1.sizeBytes }
+            items.append(
+                displayParent(
+                    name: "Home Directory",
+                    label: "Home Directory",
+                    icon: "folder.fill",
+                    color: .blue,
+                    note: "Non-system Items",
+                    children: homeChildren
+                )
+            )
+        }
+        return DetailScanResult(items: items, containerAccessDenied: false)
     }
 
-    // Dynamically scan simulator devices by OS version
+    // Fill in sizeBytes for items that listed paths up front (simulator versions, etc.).
+    func measurePendingSizes(_ item: CategoryItem) -> CategoryItem {
+        var result = item
+        if let children = item.children, !children.isEmpty {
+            let count = children.count
+            var measured = [CategoryItem?](repeating: nil, count: count)
+            let lock = NSLock()
+            DispatchQueue.concurrentPerform(iterations: count) { index in
+                let child = measurePendingSizes(children[index])
+                lock.lock()
+                measured[index] = child
+                lock.unlock()
+            }
+            let resolved = measured.compactMap { $0 }
+            result.children = resolved
+            let total = resolved.reduce(Int64(0)) { $0 + $1.sizeBytes }
+            result.sizeBytes = total
+            result.sizeString = total > 0 ? formatBytes(total) : ""
+            result.pendingSizePaths = nil
+            return result
+        }
+
+        if let paths = item.pendingSizePaths, !paths.isEmpty {
+            var total: Int64 = 0
+            let fileManager = FileManager.default
+            for path in paths {
+                var isDirectory: ObjCBool = false
+                if fileManager.fileExists(atPath: path, isDirectory: &isDirectory) {
+                    total += calculateDirectorySize(
+                        at: path,
+                        isDirectory: isDirectory.boolValue
+                    )
+                }
+            }
+            result.sizeBytes = total
+            result.sizeString = total > 0 ? formatBytes(total) : ""
+            result.pendingSizePaths = nil
+        }
+        return result
+    }
+
+    static func containsPendingSizes(_ item: CategoryItem) -> Bool {
+        if let paths = item.pendingSizePaths, !paths.isEmpty {
+            return true
+        }
+        return item.children?.contains(where: containsPendingSizes) ?? false
+    }
+
+    // List simulator devices by OS version without sizing; sizes load later via measurePendingSizes.
     private func scanSimulatorVersions(basePath: String) -> [CategoryItem] {
         let expandedPath = NSString(string: basePath).expandingTildeInPath
         let fileManager = FileManager.default
@@ -1390,60 +1595,86 @@ nonisolated struct FileSystemScanner: Sendable {
             return []
         }
 
-        var versionGroups: [String: (paths: [String], bytes: Int64, count: Int)] = [:]
+        var versionGroups: [String: [String]] = [:]
 
         for folder in deviceFolders {
             let fullFolderURL = URL(fileURLWithPath: expandedPath).appendingPathComponent(folder)
             let plistURL = fullFolderURL.appendingPathComponent("device.plist")
 
-            if fileManager.fileExists(atPath: plistURL.path) {
-                var versionName = "Unknown Simulator"
-                if let data = try? Data(contentsOf: plistURL),
-                   let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
-                   let runtime = plist["runtime"] as? String {
-                    versionName = parseRuntimeName(runtime)
-                }
+            guard fileManager.fileExists(atPath: plistURL.path) else { continue }
 
-                let folderSize = calculateDirectorySize(at: fullFolderURL.path, isDirectory: true)
-                if var existing = versionGroups[versionName] {
-                    existing.paths.append(fullFolderURL.path)
-                    existing.bytes += folderSize
-                    existing.count += 1
-                    versionGroups[versionName] = existing
-                } else {
-                    versionGroups[versionName] = (paths: [fullFolderURL.path], bytes: folderSize, count: 1)
-                }
+            var versionName = "Unknown Simulator"
+            if let data = try? Data(contentsOf: plistURL),
+               let plist = try? PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+               ) as? [String: Any],
+               let runtime = plist["runtime"] as? String {
+                versionName = parseRuntimeName(runtime)
             }
+            versionGroups[versionName, default: []].append(fullFolderURL.path)
         }
 
-        // Only remind if multiple versions (> 1) are detected
-        guard versionGroups.keys.count > 1 else {
-            return []
-        }
+        guard !versionGroups.isEmpty else { return [] }
 
-        let totalBytes = versionGroups.values.reduce(0) { $0 + $1.bytes }
+        let versionChildren: [CategoryItem] = versionGroups
+            .sorted { $0.key.localizedStandardCompare($1.key) == .orderedAscending }
+            .map { versionName, paths in
+                let sortedPaths = paths.sorted()
+                let deviceCount = sortedPaths.count
+                let noteKey: LocalizedStringKey = deviceCount == 1
+                    ? "1 Device"
+                    : "\(deviceCount) Devices"
+                return CategoryItem(
+                    name: versionName,
+                    pathDescription: versionName,
+                    iconName: "iphone",
+                    iconColor: .purple,
+                    sizeBytes: 0,
+                    sizeString: "",
+                    rule: CleanRule(
+                        name: versionName,
+                        pathDescription: versionName,
+                        iconName: "iphone",
+                        iconColor: .purple,
+                        cleanType: .none,
+                        note: noteKey,
+                        isCheckboxHidden: true,
+                        scanMode: .deepAnalysis
+                    ),
+                    isDisplayOnly: true,
+                    finderPath: sortedPaths.first ?? expandedPath,
+                    description: noteKey,
+                    pendingSizePaths: sortedPaths
+                )
+            }
 
-        let reminderRule = CleanRule(
-            name: "Multiple Simulator Versions",
+        let parentRule = CleanRule(
+            name: "Simulator Devices by Version",
             pathDescription: basePath,
-            iconName: "exclamationmark.triangle.fill",
-            iconColor: .orange,
+            iconName: "iphone.badge.play",
+            iconColor: .purple,
             cleanType: .none,
-            note: "\(versionGroups.keys.count) Versions",
-            isCheckboxHidden: true
+            note: "\(versionChildren.count) Versions",
+            isDynamicSimulatorRule: true,
+            isCheckboxHidden: true,
+            scanMode: .deepAnalysis
         )
 
-        let item = CategoryItem(
-            name: reminderRule.name,
-            pathDescription: reminderRule.pathDescription,
-            iconName: reminderRule.iconName,
-            iconColor: reminderRule.iconColor,
-            sizeBytes: totalBytes,
-            sizeString: formatBytes(totalBytes),
-            rule: reminderRule
+        let parent = CategoryItem(
+            name: parentRule.name,
+            pathDescription: parentRule.pathDescription,
+            iconName: parentRule.iconName,
+            iconColor: parentRule.iconColor,
+            sizeBytes: 0,
+            sizeString: "",
+            rule: parentRule,
+            children: versionChildren,
+            isDisplayOnly: true,
+            finderPath: expandedPath
         )
-
-        return [item]
+        return [parent]
     }
 
     private func parseRuntimeName(_ runtime: String) -> String {
@@ -2883,237 +3114,440 @@ nonisolated struct FileSystemScanner: Sendable {
         return result
     }
 
-    // Build the read-only "Installed Tools" tree from non-system PATH tools and their modules.
-    // Only top-level / user-installed packages are listed; each carries a best-effort on-disk size.
-    private func scanInstalledTools() -> CategoryItem {
-        let dirs = nonSystemPathDirs()
-        let home = NSHomeDirectory()
-        let fm = FileManager.default
+    private func trimCommandLines(_ s: String) -> [String] {
+        s.split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
 
-        func trimLines(_ s: String) -> [String] {
-            s.split(separator: "\n")
-             .map { String($0).trimmingCharacters(in: .whitespaces) }
-             .filter { !$0.isEmpty }
-        }
-
-        var toolNodes: [CategoryItem] = []
+    private func scanHomebrewTools(dirs: [String]) -> (item: CategoryItem?, ownedDirs: Set<String>) {
         var ownedDirs = Set<String>()
+        guard let brewPath = locateBinary("brew", in: dirs) else {
+            return (nil, ownedDirs)
+        }
+        let prefix = runCommandCapture(brewPath, ["--prefix"]) ?? "/opt/homebrew"
+        let cellar = runCommandCapture(brewPath, ["--cellar"]) ?? "\(prefix)/Cellar"
+        let caskroom = "\(prefix)/Caskroom"
+        let appMap = appSizeMap()
+        var groups: [CategoryItem] = []
 
-        // --- Homebrew (top-level formulae via `brew leaves`, plus casks) ---
-        if let brewPath = locateBinary("brew", in: dirs) {
-            let prefix = runCommandCapture(brewPath, ["--prefix"]) ?? "/opt/homebrew"
-            let cellar = runCommandCapture(brewPath, ["--cellar"]) ?? "\(prefix)/Cellar"
-            let caskroom = "\(prefix)/Caskroom"
-            let appMap = appSizeMap()
-            var groups: [CategoryItem] = []
-
-            if let out = runCommandCapture(brewPath, ["leaves"]) {
-                let items = trimLines(out).map { name -> CategoryItem in
-                    let keg = (cellar as NSString).appendingPathComponent(name)
-                    return leaf(name, calculateDirectorySize(at: keg, isDirectory: true), finderPath: keg)
-                }.sorted { $0.sizeBytes > $1.sizeBytes }
-                if !items.isEmpty {
-                    groups.append(displayParent(name: "Formulae", label: "Formulae (\(items.count))", icon: "shippingbox.fill", color: .orange, children: items, finderPath: cellar))
-                }
-            }
-            if let out = runCommandCapture(brewPath, ["list", "--cask"]) {
-                let items = trimLines(out).map { name -> CategoryItem in
-                    let caskPath = (caskroom as NSString).appendingPathComponent(name)
-                    var size = calculateDirectorySize(at: caskPath, isDirectory: true)
-                    let appPath = appMap[normalizeString(name)]
-                    if let appPath = appPath {
-                        size += calculateDirectorySize(at: appPath, isDirectory: true)
-                    }
-                    return leaf(name, size, finderPath: appPath ?? caskPath)
-                }.sorted { $0.sizeBytes > $1.sizeBytes }
-                if !items.isEmpty {
-                    groups.append(displayParent(name: "Casks", label: "Casks (\(items.count))", icon: "shippingbox.fill", color: .orange, children: items, finderPath: caskroom))
-                }
-            }
-            ownedDirs.insert((brewPath as NSString).deletingLastPathComponent)
-            if dirs.contains("/usr/local/bin") { ownedDirs.insert("/usr/local/bin") }
-
-            if !groups.isEmpty {
-                toolNodes.append(displayParent(name: "Homebrew", label: "Homebrew", icon: "cup.and.saucer.fill", color: .orange, children: groups, finderPath: prefix))
+        if let out = runCommandCapture(brewPath, ["leaves"]) {
+            let items = trimCommandLines(out).map { name -> CategoryItem in
+                let keg = (cellar as NSString).appendingPathComponent(name)
+                return leaf(name, calculateDirectorySize(at: keg, isDirectory: true), finderPath: keg)
+            }.sorted { $0.sizeBytes > $1.sizeBytes }
+            if !items.isEmpty {
+                groups.append(
+                    displayParent(
+                        name: "Formulae",
+                        label: "Formulae (\(items.count))",
+                        icon: "shippingbox.fill",
+                        color: .orange,
+                        children: items,
+                        finderPath: cellar
+                    )
+                )
             }
         }
-
-        // --- Node.js (enumerate every installation: nvm/fnm/volta/asdf/nodenv/n, Homebrew, /usr/local, npmrc/env prefix, active PATH) ---
-        if let nodeNode = scanNodeInstalls(dirs: dirs, ownedDirs: &ownedDirs) {
-            toolNodes.append(nodeNode)
-        }
-
-        // --- pnpm (global) ---
-        if let pnpmPath = locateBinary("pnpm", in: dirs) {
-            var root: String?
-            var pkgs: [(String, Int64)] = []
-            if let r = runCommandCapture(pnpmPath, ["root", "-g"]) {
-                root = r
-                pkgs = sizedPackages(in: r)
-            }
-            if let gbin = runCommandCapture(pnpmPath, ["config", "get", "global-bin-dir"]), !gbin.isEmpty {
-                ownedDirs.insert(gbin)
-            }
-            if !pkgs.isEmpty, let r = root {
-                let children = pkgs.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (r as NSString).appendingPathComponent($0.0)) }
-                toolNodes.append(displayParent(name: "pnpm", label: "pnpm (global)", icon: "shippingbox.fill", color: .teal, children: children, finderPath: r))
-            }
-        }
-
-        // --- Yarn (global) ---
-        if let yarnPath = locateBinary("yarn", in: dirs) {
-            var root: String?
-            var pkgs: [(String, Int64)] = []
-            if let gdir = runCommandCapture(yarnPath, ["global", "dir"]) {
-                let r = (gdir as NSString).appendingPathComponent("node_modules")
-                root = r
-                pkgs = sizedPackages(in: r)
-            }
-            if let gbin = runCommandCapture(yarnPath, ["global", "bin"]) {
-                ownedDirs.insert(gbin)
-            }
-            if !pkgs.isEmpty, let r = root {
-                let children = pkgs.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (r as NSString).appendingPathComponent($0.0)) }
-                toolNodes.append(displayParent(name: "Yarn", label: "Yarn (global)", icon: "shippingbox.fill", color: .blue, children: children, finderPath: r))
-            }
-        }
-
-        // --- Cargo (user-installed crates; size = sum of the binaries each crate installed) ---
-        if let cargoPath = locateBinary("cargo", in: dirs) {
-            let cargoBin = (cargoPath as NSString).deletingLastPathComponent
-            var crates: [(String, Int64)] = []
-            if let out = runCommandCapture(cargoPath, ["install", "--list"]) {
-                let headerRegex = try? NSRegularExpression(pattern: "^(\\S+) v[\\d.]+:")
-                var currentName: String?
-                var currentBins: [String] = []
-                func flush() {
-                    guard let n = currentName else { return }
-                    var size: Int64 = 0
-                    for b in currentBins {
-                        size += calculateDirectorySize(at: (cargoBin as NSString).appendingPathComponent(b), isDirectory: false)
-                    }
-                    crates.append((n, size))
-                    currentName = nil
-                    currentBins = []
+        if let out = runCommandCapture(brewPath, ["list", "--cask"]) {
+            let items = trimCommandLines(out).map { name -> CategoryItem in
+                let caskPath = (caskroom as NSString).appendingPathComponent(name)
+                var size = calculateDirectorySize(at: caskPath, isDirectory: true)
+                if let appPath = appMap[normalizeString(name)] {
+                    size += calculateDirectorySize(at: appPath, isDirectory: true)
                 }
-                for raw in out.split(separator: "\n") {
-                    let line = String(raw)
-                    let range = NSRange(line.startIndex..., in: line)
-                    if let m = headerRegex?.firstMatch(in: line, options: [], range: range),
-                       let r = Range(m.range(at: 1), in: line) {
-                        flush()
-                        currentName = String(line[r])
-                    } else if line.first?.isWhitespace == true {
-                        let bin = line.trimmingCharacters(in: .whitespaces)
-                        if !bin.isEmpty { currentBins.append(bin) }
-                    }
-                }
-                flush()
-            }
-            ownedDirs.insert(cargoBin)
-            if !crates.isEmpty {
-                let children = crates.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: cargoBin) }
-                toolNodes.append(displayParent(name: "Cargo", label: "Cargo", icon: "hammer.fill", color: .orange, children: children, finderPath: cargoBin))
+                return leaf(name, size, finderPath: appMap[normalizeString(name)] ?? caskPath)
+            }.sorted { $0.sizeBytes > $1.sizeBytes }
+            if !items.isEmpty {
+                groups.append(
+                    displayParent(
+                        name: "Casks",
+                        label: "Casks (\(items.count))",
+                        icon: "shippingbox.fill",
+                        color: .orange,
+                        children: items,
+                        finderPath: caskroom
+                    )
+                )
             }
         }
+        ownedDirs.insert((brewPath as NSString).deletingLastPathComponent)
+        if dirs.contains("/usr/local/bin") { ownedDirs.insert("/usr/local/bin") }
+        guard !groups.isEmpty else { return (nil, ownedDirs) }
+        return (
+            displayParent(
+                name: "Homebrew",
+                label: "Homebrew",
+                icon: "cup.and.saucer.fill",
+                color: .orange,
+                children: groups,
+                finderPath: prefix
+            ),
+            ownedDirs
+        )
+    }
 
-        // --- Ruby gems (size each installed gem dir across all GEM PATHS) ---
-        if let gemPath = locateBinary("gem", in: dirs) {
-            let gpaths = gemPaths(gemPath: gemPath)
-            var gemSizes: [String: Int64] = [:]
-            var gemLoc: [String: String] = [:]
-            for gp in gpaths {
-                let gemsDir = (gp as NSString).appendingPathComponent("gems")
-                guard let entries = try? fm.contentsOfDirectory(atPath: gemsDir) else { continue }
-                for entry in entries {
-                    guard let name = gemName(from: entry) else { continue }
-                    let dir = (gemsDir as NSString).appendingPathComponent(entry)
-                    let size = calculateDirectorySize(at: dir, isDirectory: true)
-                    gemSizes[name, default: 0] += size
-                    if gemLoc[name] == nil { gemLoc[name] = dir }
-                }
-            }
-            if !gemSizes.isEmpty {
-                let children = gemSizes.map { leaf($0.key, $0.value, finderPath: gemLoc[$0.key]) }.sorted { $0.sizeBytes > $1.sizeBytes }
-                toolNodes.append(displayParent(name: "Ruby Gems", label: "Ruby Gems", icon: "diamond.fill", color: .red, children: children, finderPath: gpaths.first))
-            }
+    private func scanPnpmTools(dirs: [String]) -> (item: CategoryItem?, ownedDirs: Set<String>) {
+        var ownedDirs = Set<String>()
+        guard let pnpmPath = locateBinary("pnpm", in: dirs) else {
+            return (nil, ownedDirs)
         }
-
-        // --- Go (GOPATH/bin tools) ---
-        if let goPath = locateBinary("go", in: dirs) {
-            var tools: [(String, Int64)] = []
-            var goBin: String?
-            if let gopath = runCommandCapture(goPath, ["env", "GOPATH"]), !gopath.isEmpty {
-                let resolved = gopath.hasPrefix("~/")
-                    ? (home as NSString).appendingPathComponent(String(gopath.dropFirst(2)))
-                    : gopath
-                let bin = (resolved as NSString).appendingPathComponent("bin")
-                for name in binariesInDir(bin) {
-                    let size = calculateDirectorySize(at: (bin as NSString).appendingPathComponent(name), isDirectory: false)
-                    tools.append((name, size))
-                }
-                ownedDirs.insert(bin)
-                goBin = bin
-            }
-            if !tools.isEmpty, let bin = goBin {
-                let children = tools.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (bin as NSString).appendingPathComponent($0.0)) }
-                toolNodes.append(displayParent(name: "Go", label: "Go", icon: "shippingbox.fill", color: .cyan, children: children, finderPath: bin))
-            }
+        var root: String?
+        var pkgs: [(String, Int64)] = []
+        if let r = runCommandCapture(pnpmPath, ["root", "-g"]) {
+            root = r
+            pkgs = sizedPackages(in: r)
         }
+        if let gbin = runCommandCapture(pnpmPath, ["config", "get", "global-bin-dir"]), !gbin.isEmpty {
+            ownedDirs.insert(gbin)
+        }
+        guard !pkgs.isEmpty, let r = root else { return (nil, ownedDirs) }
+        let children = pkgs.sorted { $0.1 > $1.1 }.map {
+            leaf($0.0, $0.1, finderPath: (r as NSString).appendingPathComponent($0.0))
+        }
+        return (
+            displayParent(
+                name: "pnpm",
+                label: "pnpm (global)",
+                icon: "shippingbox.fill",
+                color: .teal,
+                children: children,
+                finderPath: r
+            ),
+            ownedDirs
+        )
+    }
 
-        // --- Pipx ---
-        if let pipxPath = locateBinary("pipx", in: dirs) {
-            var pipxHome = ""
-            if let env = runCommandCapture(pipxPath, ["environment"]) {
-                for raw in env.split(separator: "\n") {
-                    let s = String(raw).trimmingCharacters(in: .whitespaces)
-                    if s.hasPrefix("PIPX_HOME"), let eq = s.firstIndex(of: "=") {
-                        var val = String(s[s.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
-                        val = val.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
-                        pipxHome = val
-                    }
+    private func scanYarnTools(dirs: [String]) -> (item: CategoryItem?, ownedDirs: Set<String>) {
+        var ownedDirs = Set<String>()
+        guard let yarnPath = locateBinary("yarn", in: dirs) else {
+            return (nil, ownedDirs)
+        }
+        var root: String?
+        var pkgs: [(String, Int64)] = []
+        if let gdir = runCommandCapture(yarnPath, ["global", "dir"]) {
+            let r = (gdir as NSString).appendingPathComponent("node_modules")
+            root = r
+            pkgs = sizedPackages(in: r)
+        }
+        if let gbin = runCommandCapture(yarnPath, ["global", "bin"]) {
+            ownedDirs.insert(gbin)
+        }
+        guard !pkgs.isEmpty, let r = root else { return (nil, ownedDirs) }
+        let children = pkgs.sorted { $0.1 > $1.1 }.map {
+            leaf($0.0, $0.1, finderPath: (r as NSString).appendingPathComponent($0.0))
+        }
+        return (
+            displayParent(
+                name: "Yarn",
+                label: "Yarn (global)",
+                icon: "shippingbox.fill",
+                color: .blue,
+                children: children,
+                finderPath: r
+            ),
+            ownedDirs
+        )
+    }
+
+    private func scanCargoTools(dirs: [String]) -> (item: CategoryItem?, ownedDirs: Set<String>) {
+        var ownedDirs = Set<String>()
+        guard let cargoPath = locateBinary("cargo", in: dirs) else {
+            return (nil, ownedDirs)
+        }
+        let cargoBin = (cargoPath as NSString).deletingLastPathComponent
+        var crates: [(String, Int64)] = []
+        if let out = runCommandCapture(cargoPath, ["install", "--list"]) {
+            let headerRegex = try? NSRegularExpression(pattern: "^(\\S+) v[\\d.]+:")
+            var currentName: String?
+            var currentBins: [String] = []
+            func flush() {
+                guard let n = currentName else { return }
+                var size: Int64 = 0
+                for b in currentBins {
+                    size += calculateDirectorySize(
+                        at: (cargoBin as NSString).appendingPathComponent(b),
+                        isDirectory: false
+                    )
                 }
+                crates.append((n, size))
+                currentName = nil
+                currentBins = []
             }
-            if pipxHome.isEmpty {
-                pipxHome = (home as NSString).appendingPathComponent(".local/pipx")
-            }
-            let venvsDir = (pipxHome as NSString).appendingPathComponent("venvs")
-            var apps: [(String, Int64)] = []
-            if let out = runCommandCapture(pipxPath, ["list", "--short"]) {
-                for name in trimLines(out) {
-                    let size = calculateDirectorySize(at: (venvsDir as NSString).appendingPathComponent(name), isDirectory: true)
-                    apps.append((name, size))
+            for raw in out.split(separator: "\n") {
+                let line = String(raw)
+                let range = NSRange(line.startIndex..., in: line)
+                if let m = headerRegex?.firstMatch(in: line, options: [], range: range),
+                   let r = Range(m.range(at: 1), in: line) {
+                    flush()
+                    currentName = String(line[r])
+                } else if line.first?.isWhitespace == true {
+                    let bin = line.trimmingCharacters(in: .whitespaces)
+                    if !bin.isEmpty { currentBins.append(bin) }
                 }
             }
-            if !apps.isEmpty {
-                let children = apps.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (venvsDir as NSString).appendingPathComponent($0.0)) }
-                toolNodes.append(displayParent(name: "Pipx", label: "Pipx", icon: "shippingbox.fill", color: .indigo, children: children, finderPath: venvsDir))
+            flush()
+        }
+        ownedDirs.insert(cargoBin)
+        guard !crates.isEmpty else { return (nil, ownedDirs) }
+        let children = crates.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: cargoBin) }
+        return (
+            displayParent(
+                name: "Cargo",
+                label: "Cargo",
+                icon: "hammer.fill",
+                color: .orange,
+                children: children,
+                finderPath: cargoBin
+            ),
+            ownedDirs
+        )
+    }
+
+    private func scanRubyGemsTools(dirs: [String]) -> CategoryItem? {
+        guard let gemPath = locateBinary("gem", in: dirs) else { return nil }
+        let fm = FileManager.default
+        let gpaths = gemPaths(gemPath: gemPath)
+        var gemSizes: [String: Int64] = [:]
+        var gemLoc: [String: String] = [:]
+        for gp in gpaths {
+            let gemsDir = (gp as NSString).appendingPathComponent("gems")
+            guard let entries = try? fm.contentsOfDirectory(atPath: gemsDir) else { continue }
+            for entry in entries {
+                guard let name = gemName(from: entry) else { continue }
+                let dir = (gemsDir as NSString).appendingPathComponent(entry)
+                gemSizes[name, default: 0] += calculateDirectorySize(at: dir, isDirectory: true)
+                if gemLoc[name] == nil { gemLoc[name] = dir }
             }
         }
+        guard !gemSizes.isEmpty else { return nil }
+        let children = gemSizes
+            .map { leaf($0.key, $0.value, finderPath: gemLoc[$0.key]) }
+            .sorted { $0.sizeBytes > $1.sizeBytes }
+        return displayParent(
+            name: "Ruby Gems",
+            label: "Ruby Gems",
+            icon: "diamond.fill",
+            color: .red,
+            children: children,
+            finderPath: gpaths.first
+        )
+    }
 
-        // --- Other non-system PATH tools (dirs not owned by a manager above) ---
+    private func scanGoTools(dirs: [String]) -> (item: CategoryItem?, ownedDirs: Set<String>) {
+        var ownedDirs = Set<String>()
+        guard let goPath = locateBinary("go", in: dirs) else {
+            return (nil, ownedDirs)
+        }
+        let home = NSHomeDirectory()
+        var tools: [(String, Int64)] = []
+        var goBin: String?
+        if let gopath = runCommandCapture(goPath, ["env", "GOPATH"]), !gopath.isEmpty {
+            let resolved = gopath.hasPrefix("~/")
+                ? (home as NSString).appendingPathComponent(String(gopath.dropFirst(2)))
+                : gopath
+            let bin = (resolved as NSString).appendingPathComponent("bin")
+            for name in binariesInDir(bin) {
+                let size = calculateDirectorySize(
+                    at: (bin as NSString).appendingPathComponent(name),
+                    isDirectory: false
+                )
+                tools.append((name, size))
+            }
+            ownedDirs.insert(bin)
+            goBin = bin
+        }
+        guard !tools.isEmpty, let bin = goBin else { return (nil, ownedDirs) }
+        let children = tools.sorted { $0.1 > $1.1 }.map {
+            leaf($0.0, $0.1, finderPath: (bin as NSString).appendingPathComponent($0.0))
+        }
+        return (
+            displayParent(
+                name: "Go",
+                label: "Go",
+                icon: "shippingbox.fill",
+                color: .cyan,
+                children: children,
+                finderPath: bin
+            ),
+            ownedDirs
+        )
+    }
+
+    private func scanPipxTools(dirs: [String]) -> CategoryItem? {
+        guard let pipxPath = locateBinary("pipx", in: dirs) else { return nil }
+        let home = NSHomeDirectory()
+        var pipxHome = ""
+        if let env = runCommandCapture(pipxPath, ["environment"]) {
+            for raw in env.split(separator: "\n") {
+                let s = String(raw).trimmingCharacters(in: .whitespaces)
+                if s.hasPrefix("PIPX_HOME"), let eq = s.firstIndex(of: "=") {
+                    var val = String(s[s.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+                    val = val.trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+                    pipxHome = val
+                }
+            }
+        }
+        if pipxHome.isEmpty {
+            pipxHome = (home as NSString).appendingPathComponent(".local/pipx")
+        }
+        let venvsDir = (pipxHome as NSString).appendingPathComponent("venvs")
+        var apps: [(String, Int64)] = []
+        if let out = runCommandCapture(pipxPath, ["list", "--short"]) {
+            for name in trimCommandLines(out) {
+                let size = calculateDirectorySize(
+                    at: (venvsDir as NSString).appendingPathComponent(name),
+                    isDirectory: true
+                )
+                apps.append((name, size))
+            }
+        }
+        guard !apps.isEmpty else { return nil }
+        let children = apps.sorted { $0.1 > $1.1 }.map {
+            leaf($0.0, $0.1, finderPath: (venvsDir as NSString).appendingPathComponent($0.0))
+        }
+        return displayParent(
+            name: "Pipx",
+            label: "Pipx",
+            icon: "shippingbox.fill",
+            color: .indigo,
+            children: children,
+            finderPath: venvsDir
+        )
+    }
+
+    private func scanOtherPathTools(dirs: [String], ownedDirs: Set<String>) -> CategoryItem? {
+        let home = NSHomeDirectory()
         var otherNodes: [CategoryItem] = []
         for dir in dirs where !ownedDirs.contains(dir) {
             var bins: [(String, Int64)] = []
             for name in binariesInDir(dir) {
-                let size = calculateDirectorySize(at: (dir as NSString).appendingPathComponent(name), isDirectory: false)
+                let size = calculateDirectorySize(
+                    at: (dir as NSString).appendingPathComponent(name),
+                    isDirectory: false
+                )
                 bins.append((name, size))
             }
             if bins.isEmpty { continue }
             let display = dir.hasPrefix(home) ? "~" + dir.dropFirst(home.count) : dir
-            let children = bins.sorted { $0.1 > $1.1 }.map { leaf($0.0, $0.1, finderPath: (dir as NSString).appendingPathComponent($0.0)) }
-            otherNodes.append(displayParent(name: dir, label: display, icon: "folder.fill", color: .blue, children: children, finderPath: dir))
+            let children = bins.sorted { $0.1 > $1.1 }.map {
+                leaf($0.0, $0.1, finderPath: (dir as NSString).appendingPathComponent($0.0))
+            }
+            otherNodes.append(
+                displayParent(
+                    name: dir,
+                    label: display,
+                    icon: "folder.fill",
+                    color: .blue,
+                    children: children,
+                    finderPath: dir
+                )
+            )
         }
-        if !otherNodes.isEmpty {
-            otherNodes.sort { $0.sizeBytes > $1.sizeBytes }
-            toolNodes.append(displayParent(name: "Other PATH tools", label: "Other PATH tools", icon: "folder.fill", color: .blue, children: otherNodes))
+        guard !otherNodes.isEmpty else { return nil }
+        otherNodes.sort { $0.sizeBytes > $1.sizeBytes }
+        return displayParent(
+            name: "Other PATH tools",
+            label: "Other PATH tools",
+            icon: "folder.fill",
+            color: .blue,
+            children: otherNodes
+        )
+    }
+
+    // Build the read-only "Installed Tools" tree from non-system PATH tools and their modules.
+    private func scanInstalledTools() -> CategoryItem {
+        let dirs = nonSystemPathDirs()
+        var toolNodes: [CategoryItem] = []
+        var ownedDirs = Set<String>()
+
+        let brew = scanHomebrewTools(dirs: dirs)
+        ownedDirs.formUnion(brew.ownedDirs)
+        if let item = brew.item { toolNodes.append(item) }
+
+        if let nodeNode = scanNodeInstalls(dirs: dirs, ownedDirs: &ownedDirs) {
+            toolNodes.append(nodeNode)
         }
 
-        // Drop tool nodes whose on-disk location is already listed in the Home Directory
-        // section (e.g. ~/.cargo, ~/go, ~/.nvm) so the same data isn't shown twice.
+        let pnpm = scanPnpmTools(dirs: dirs)
+        ownedDirs.formUnion(pnpm.ownedDirs)
+        if let item = pnpm.item { toolNodes.append(item) }
+
+        let yarn = scanYarnTools(dirs: dirs)
+        ownedDirs.formUnion(yarn.ownedDirs)
+        if let item = yarn.item { toolNodes.append(item) }
+
+        let cargo = scanCargoTools(dirs: dirs)
+        ownedDirs.formUnion(cargo.ownedDirs)
+        if let item = cargo.item { toolNodes.append(item) }
+
+        if let gems = scanRubyGemsTools(dirs: dirs) { toolNodes.append(gems) }
+
+        let go = scanGoTools(dirs: dirs)
+        ownedDirs.formUnion(go.ownedDirs)
+        if let item = go.item { toolNodes.append(item) }
+
+        if let pipx = scanPipxTools(dirs: dirs) { toolNodes.append(pipx) }
+        if let other = scanOtherPathTools(dirs: dirs, ownedDirs: ownedDirs) {
+            toolNodes.append(other)
+        }
+
         let coveredPaths = homeDirectoryEntryPaths()
         let filteredToolNodes = filterHomeCoveredNodes(toolNodes, coveredPaths: coveredPaths)
-        return displayParent(name: "Installed Tools", label: "Installed Tools", icon: "terminal.fill", color: .primary, note: "Read Only", children: filteredToolNodes)
+        return displayParent(
+            name: "Installed Tools",
+            label: "Installed Tools",
+            icon: "terminal.fill",
+            color: .primary,
+            note: "Read Only",
+            children: filteredToolNodes
+        )
+    }
+
+    private func homeDirectoryEntries() -> [String] {
+        let home = NSHomeDirectory()
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: home) else {
+            return []
+        }
+        return entries.filter { entry in
+            let lower = entry.lowercased()
+            if Self.homeSystemEntries.contains(lower) { return false }
+            if lower.hasPrefix("icloud") { return false }
+            return true
+        }
+    }
+
+    private func scanHomeDirectoryEntry(_ entry: String) -> CategoryItem? {
+        let home = NSHomeDirectory()
+        let fm = FileManager.default
+        let fullPath = (home as NSString).appendingPathComponent(entry)
+        var entryIsDir: ObjCBool = false
+        guard fm.fileExists(atPath: fullPath, isDirectory: &entryIsDir) else { return nil }
+
+        let bytes = calculateDirectorySize(at: fullPath, isDirectory: entryIsDir.boolValue)
+        let lowerEntry = entry.lowercased()
+        let icon: String
+        let color: Color
+        if let custom = Self.homeEntryIcons[lowerEntry] {
+            icon = custom.0
+            color = custom.1
+        } else if entryIsDir.boolValue {
+            icon = entry.hasPrefix(".") ? "folder.fill" : "folder"
+            color = .blue
+        } else {
+            icon = "doc"
+            color = .secondary
+        }
+
+        return displayItem(
+            name: entry,
+            label: "~/\(entry)",
+            icon: icon,
+            color: color,
+            sizeBytes: bytes,
+            finderPath: fullPath,
+            description: Self.homeEntryDescriptions[lowerEntry].map { LocalizedStringKey($0) }
+        )
     }
 
     // Enumerate every non-system entry (file or folder, hidden or visible) directly under the
@@ -3121,44 +3555,17 @@ nonisolated struct FileSystemScanner: Sendable {
     // .gradle. Display-only: each row reveals its location in Finder via the magnifying glass;
     // nothing here is ever cleaned.
     private func scanHomeDirectory() -> CategoryItem? {
-        let home = NSHomeDirectory()
-        let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(atPath: home) else { return nil }
-
-        var childItems: [CategoryItem] = []
-
-        for entry in entries {
-            let lowerEntry = entry.lowercased()
-            if Self.homeSystemEntries.contains(lowerEntry) { continue }
-            // iCloud Drive's local archive ("iCloud云盘（归档）" / "iCloud Drive") is macOS-managed
-            if lowerEntry.hasPrefix("icloud") { continue }
-
-            let fullPath = (home as NSString).appendingPathComponent(entry)
-            var entryIsDir: ObjCBool = false
-            guard fm.fileExists(atPath: fullPath, isDirectory: &entryIsDir) else { continue }
-
-            let bytes = calculateDirectorySize(at: fullPath, isDirectory: entryIsDir.boolValue)
-            var icon: String
-            var color: Color
-            
-            if let custom = Self.homeEntryIcons[lowerEntry] {
-                icon = custom.0
-                color = custom.1
-            } else if entryIsDir.boolValue {
-                icon = entry.hasPrefix(".") ? "folder.fill" : "folder"
-                color = .blue
-            } else {
-                icon = "doc"
-                color = .secondary
-            }
-            
-            childItems.append(displayItem(name: entry, label: "~/\(entry)", icon: icon, color: color, sizeBytes: bytes, finderPath: fullPath, description: Self.homeEntryDescriptions[lowerEntry].map { LocalizedStringKey($0) }))
-        }
-
+        var childItems = homeDirectoryEntries().compactMap(scanHomeDirectoryEntry)
         guard !childItems.isEmpty else { return nil }
         childItems.sort { $0.sizeBytes > $1.sizeBytes }
-
-        return displayParent(name: "Home Directory", label: "Home Directory", icon: "folder.fill", color: .blue, note: "Non-system Items", children: childItems)
+        return displayParent(
+            name: "Home Directory",
+            label: "Home Directory",
+            icon: "folder.fill",
+            color: .blue,
+            note: "Non-system Items",
+            children: childItems
+        )
     }
 
     // Mirror of scanAppLeftovers, but lists Application Support folders that belong to
