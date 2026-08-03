@@ -67,16 +67,6 @@
         }
       }
     },
-    "1 Device" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1 台设备"
-          }
-        }
-      }
-    },
     "About Deep Analysis" : {
 
     },

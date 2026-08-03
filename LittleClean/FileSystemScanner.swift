@@ -1728,9 +1728,7 @@ nonisolated struct FileSystemScanner: Sendable {
             .map { versionName, paths in
                 let sortedPaths = paths.sorted()
                 let deviceCount = sortedPaths.count
-                let noteKey: LocalizedStringKey = deviceCount == 1
-                    ? "1 Device"
-                    : "\(deviceCount) Devices"
+                let noteKey: LocalizedStringKey = "\(deviceCount) Devices"
                 return CategoryItem(
                     name: versionName,
                     pathDescription: versionName,
