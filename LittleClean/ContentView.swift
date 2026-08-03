@@ -98,15 +98,21 @@ struct ContentView: View {
     private var topStatusBar: some View {
         let session = viewModel.activeSession
         return HStack(spacing: 14) {
-            Label(
-                "\(formatBytes(viewModel.usedBytes)) / \(formatBytes(viewModel.totalBytes))",
-                systemImage: "internaldrive"
-            )
-            .foregroundColor(.secondary)
-            .font(.system(size: 12))
+            HStack(spacing: 6) {
+                DiskUsagePieChart(
+                    usedBytes: viewModel.usedBytes,
+                    freeBytes: viewModel.freeBytes
+                )
+                .frame(width: 14, height: 14)
+                .help("Used \(formatBytes(viewModel.usedBytes)) · Free \(formatBytes(viewModel.freeBytes))")
+
+                Text("\(formatBytes(viewModel.usedBytes)) / \(formatBytes(viewModel.totalBytes))")
+                    .foregroundColor(.secondary)
+                    .font(.system(size: 12))
+            }
 
             Text("Free \(formatBytes(viewModel.freeBytes))")
-                .foregroundColor(.green)
+                .foregroundColor(.secondary)
                 .font(.system(size: 12))
 
             if viewModel.needsFullDiskAccess {
@@ -472,6 +478,47 @@ private struct ModeListPane: View {
                 viewModel.openInFinder(pathDescription: target)
             }
         }
+    }
+}
+
+private struct DiskUsagePieChart: View {
+    let usedBytes: Int64
+    let freeBytes: Int64
+
+    private var usedFraction: Double {
+        let total = usedBytes + freeBytes
+        guard total > 0 else { return 0 }
+        return Double(usedBytes) / Double(total)
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size)
+            let radius = min(size.width, size.height) / 2
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let startAngle = Angle.degrees(-90)
+
+            var freePath = Path()
+            freePath.addEllipse(in: rect)
+            context.fill(freePath, with: .color(Color.secondary.opacity(0.2)))
+
+            if usedFraction > 0 {
+                let endAngle = startAngle + .degrees(360 * min(usedFraction, 1))
+                var usedPath = Path()
+                usedPath.move(to: center)
+                usedPath.addArc(
+                    center: center,
+                    radius: radius,
+                    startAngle: startAngle,
+                    endAngle: endAngle,
+                    clockwise: false
+                )
+                usedPath.closeSubpath()
+                context.fill(usedPath, with: .color(Color.accentColor))
+            }
+        }
+        .accessibilityLabel("Disk usage")
+        .accessibilityValue("\(Int((usedFraction * 100).rounded())) percent used")
     }
 }
 

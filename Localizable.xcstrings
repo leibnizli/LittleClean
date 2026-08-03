@@ -44,6 +44,9 @@
         }
       }
     },
+    "%lld percent used" : {
+
+    },
     "%lld Versions" : {
       "localizations" : {
         "zh-Hans" : {
@@ -232,6 +235,9 @@
           }
         }
       }
+    },
+    "Disk usage" : {
+
     },
     "Empty" : {
       "localizations" : {
@@ -657,6 +663,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "卸载所选应用？"
+          }
+        }
+      }
+    },
+    "Used %@ · Free %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Used %1$@ · Free %2$@"
           }
         }
       }
