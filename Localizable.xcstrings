@@ -44,9 +44,6 @@
         }
       }
     },
-    "%lld percent used" : {
-
-    },
     "%lld Devices" : {
       "localizations" : {
         "zh-Hans" : {
@@ -56,6 +53,9 @@
           }
         }
       }
+    },
+    "%lld percent used" : {
+
     },
     "%lld Versions" : {
       "localizations" : {
@@ -149,6 +149,12 @@
           }
         }
       }
+    },
+    "Application bundles to uninstall" : {
+
+    },
+    "Applications" : {
+
     },
     "Cache" : {
       "localizations" : {
@@ -378,6 +384,38 @@
     "Mode" : {
 
     },
+    "Move selected applications and their related leftovers to Trash." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将所选应用及其关联残留移到废纸篓。"
+          }
+        }
+      }
+    },
+    "Moved %@ and selected related items to Trash." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已将 %@ 及勾选的关联项目移到废纸篓。"
+          }
+        }
+      }
+    },
+    "Moved to Trash" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已移到废纸篓"
+          }
+        }
+      }
+    },
     "New Version Available" : {
       "localizations" : {
         "zh-Hans" : {
@@ -400,6 +438,16 @@
     },
     "No Global Packages" : {
 
+    },
+    "No removable applications were found." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未找到可卸载的应用。"
+          }
+        }
+      }
     },
     "Non-system Items" : {
       "localizations" : {
@@ -604,6 +652,26 @@
         }
       }
     },
+    "Skipped:" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已跳过："
+          }
+        }
+      }
+    },
+    "Some related folders could not be scanned. Grant Full Disk Access for a more complete cleanup." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "部分关联目录无法扫描。请授予完全磁盘访问权限以获得更完整的清理。"
+          }
+        }
+      }
+    },
     "System Logs" : {
       "localizations" : {
         "zh-Hans" : {
@@ -644,6 +712,26 @@
         }
       }
     },
+    "The selected application bundle and checked related items will be moved to Trash. Running apps will be quit first." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选应用及其勾选的关联项目将移到废纸篓。若应用正在运行，会先退出。"
+          }
+        }
+      }
+    },
+    "The selection is not an application bundle." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选内容不是应用程序包。"
+          }
+        }
+      }
+    },
     "Unavailable" : {
 
     },
@@ -653,6 +741,20 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "卸载"
+          }
+        }
+      }
+    },
+    "Uninstall ${applications} with LittleClean" : {
+
+    },
+    "Uninstall app with ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用 ${applicationName} 卸载应用"
           }
         }
       }
@@ -667,12 +769,44 @@
         }
       }
     },
+    "Uninstall finished." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载完成。"
+          }
+        }
+      }
+    },
     "Uninstall Selected Apps?" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "卸载所选应用？"
+          }
+        }
+      }
+    },
+    "Uninstall with ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用 ${applicationName} 卸载"
+          }
+        }
+      }
+    },
+    "Uninstall with LittleClean" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用 LittleClean 卸载"
           }
         }
       }

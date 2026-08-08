@@ -28,6 +28,10 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            if AppDelegate.shared?.isBackgroundServiceLaunch == true {
+                NSApp.keyWindow?.orderOut(nil)
+                return
+            }
             viewModel.ensureLoaded(.uninstallApps)
             viewModel.refreshFullDiskAccessStatus()
             viewModel.checkForUpdates()

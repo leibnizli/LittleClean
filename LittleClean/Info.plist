@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Uninstall with LittleClean</string>
+				<key>zh_CN</key>
+				<string>使用 LittleClean 卸载</string>
+				<key>zh_Hans</key>
+				<string>使用 LittleClean 卸载</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>uninstallApplications</string>
+			<key>NSPortName</key>
+			<string>LittleClean</string>
+			<key>NSRequiredContext</key>
+			<dict>
+				<key>NSServiceCategory</key>
+				<string>public.item</string>
+			</dict>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>com.apple.application-bundle</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

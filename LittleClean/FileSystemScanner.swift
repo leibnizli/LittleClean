@@ -74,96 +74,187 @@ private nonisolated final class InstalledAppIndex: @unchecked Sendable {
     // Apple apps the user installed into /Applications (Xcode, iWork, Final Cut, etc.)
     // remain visible because they are legitimate uninstall targets.
     func userInstalledApplications(includingAssociations: Bool = true) -> [InstalledApplication] {
-        let fileManager = FileManager.default
-        let currentAppPath = Bundle.main.bundleURL.standardizedFileURL.path
         var seenPaths = Set<String>()
         var applications: [InstalledApplication] = []
 
         for root in Self.userApplicationRoots {
             for bundleURL in Self.appBundles(in: root) {
-                let standardizedURL = bundleURL.standardizedFileURL
-                let path = standardizedURL.path
-                let resolvedPath = standardizedURL.resolvingSymlinksInPath().path
-                let resourceValues = try? standardizedURL.resourceValues(forKeys: [
-                    .isSystemImmutableKey,
-                    .volumeIsReadOnlyKey
-                ])
-                guard path != currentAppPath,
-                      !Self.isProtectedSystemApplicationPath(resolvedPath),
-                      resourceValues?.isSystemImmutable != true,
-                      resourceValues?.volumeIsReadOnly != true,
-                      !Self.isApplePlatformSystemApplication(at: standardizedURL),
-                      fileManager.isDeletableFile(atPath: path),
-                      seenPaths.insert(path).inserted else {
+                let path = bundleURL.standardizedFileURL.path
+                guard seenPaths.insert(path).inserted,
+                      let application = makeApplication(
+                        at: path,
+                        includingAssociations: includingAssociations
+                      ) else {
                     continue
                 }
-
-                let infoPlistURL = bundleURL.appendingPathComponent("Contents/Info.plist")
-                let plist = (try? Data(contentsOf: infoPlistURL)).flatMap {
-                    try? PropertyListSerialization.propertyList(
-                        from: $0,
-                        options: [],
-                        format: nil
-                    ) as? [String: Any]
-                }
-                let bundleIdentifier = plist?["CFBundleIdentifier"] as? String
-                if Self.isBlockedSystemBundleIdentifier(bundleIdentifier) {
-                    continue
-                }
-                let finderName = (fileManager.displayName(atPath: path) as NSString)
-                    .deletingPathExtension
-                let diskName = bundleURL.deletingPathExtension().lastPathComponent
-                let displayName = (plist?["CFBundleDisplayName"] as? String)
-                    ?? (plist?["CFBundleName"] as? String)
-                    ?? finderName
-
-                var matchingNames = Set<String>()
-                for candidate in [
-                    finderName,
-                    diskName,
-                    displayName,
-                    plist?["CFBundleName"] as? String,
-                    plist?["CFBundleExecutable"] as? String
-                ].compactMap({ $0 }) {
-                    let normalized = normalizeAppIdentifier(candidate)
-                    if normalized.count >= 4 {
-                        matchingNames.insert(normalized)
-                    }
-                }
-
-                var relatedIdentifiers = Set<String>()
-                var applicationGroups = Set<String>()
-                if let bundleIdentifier {
-                    relatedIdentifiers.insert(bundleIdentifier.lowercased())
-                }
-                if includingAssociations {
-                    relatedIdentifiers.formUnion(Self.embeddedBundleIdentifiers(in: bundleURL))
-                    let signing = Self.signingFacts(at: bundleURL)
-                    relatedIdentifiers.formUnion(signing.identifiers)
-                    applicationGroups = signing.applicationGroups
-                }
-                let homebrewPath = Self.homebrewCaskPath(forResolvedAppPath: resolvedPath)
-                let isSetapp = path.contains("/Applications/Setapp/")
-                    || path.contains("/Setapp/")
-
-                applications.append(InstalledApplication(
-                    name: displayName,
-                    bundleIdentifier: bundleIdentifier,
-                    path: path,
-                    matchingNames: matchingNames,
-                    relatedIdentifiers: relatedIdentifiers,
-                    applicationGroups: applicationGroups,
-                    managedPaths: Set([homebrewPath].compactMap { $0 }),
-                    installSource: homebrewPath == nil
-                        ? (isSetapp ? "Setapp" : nil)
-                        : "Homebrew Cask"
-                ))
+                applications.append(application)
             }
         }
 
         return applications.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
+    }
+
+    // Lightweight peers for association collision checks: Info.plist only, no code-signing.
+    func associationPeerApplications() -> [InstalledApplication] {
+        var seenPaths = Set<String>()
+        var applications: [InstalledApplication] = []
+
+        for root in Self.userApplicationRoots {
+            for bundleURL in Self.appBundles(in: root) {
+                let path = bundleURL.standardizedFileURL.path
+                guard seenPaths.insert(path).inserted,
+                      let application = makeApplication(
+                        at: path,
+                        includingAssociations: false,
+                        validateRemovability: false
+                      ) else {
+                    continue
+                }
+                applications.append(application)
+            }
+        }
+        return applications
+    }
+
+    // Resolve a single .app for Finder Services / App Intents. Rejects LittleClean itself,
+    // protected system apps, and bundles the user cannot delete.
+    func makeApplication(
+        at appPath: String,
+        includingAssociations: Bool,
+        validateRemovability: Bool = true
+    ) -> InstalledApplication? {
+        let fileManager = FileManager.default
+        let bundleURL = URL(fileURLWithPath: appPath).standardizedFileURL
+        let path = bundleURL.path
+        let resolvedURL = bundleURL.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedPath = resolvedURL.path
+        let currentAppPath = Bundle.main.bundleURL.standardizedFileURL.path
+        let resourceValues = try? bundleURL.resourceValues(forKeys: [
+            .isApplicationKey,
+            .isSystemImmutableKey,
+            .volumeIsReadOnlyKey
+        ])
+
+        guard path.lowercased().hasSuffix(".app") || resourceValues?.isApplication == true else {
+            return nil
+        }
+        if validateRemovability {
+            guard path != currentAppPath,
+                  !Self.isProtectedSystemApplicationPath(resolvedPath),
+                  resourceValues?.isSystemImmutable != true,
+                  resourceValues?.volumeIsReadOnly != true,
+                  !Self.isApplePlatformSystemApplication(at: bundleURL),
+                  fileManager.isDeletableFile(atPath: path) else {
+                return nil
+            }
+        } else if path == currentAppPath || Self.isProtectedSystemApplicationPath(resolvedPath) {
+            return nil
+        }
+
+        let infoPlistURL = bundleURL.appendingPathComponent("Contents/Info.plist")
+        let plist = (try? Data(contentsOf: infoPlistURL)).flatMap {
+            try? PropertyListSerialization.propertyList(
+                from: $0,
+                options: [],
+                format: nil
+            ) as? [String: Any]
+        }
+        let bundleIdentifier = plist?["CFBundleIdentifier"] as? String
+        guard !Self.isBlockedSystemBundleIdentifier(bundleIdentifier) else {
+            return nil
+        }
+
+        let finderName = (fileManager.displayName(atPath: path) as NSString)
+            .deletingPathExtension
+        let diskName = bundleURL.deletingPathExtension().lastPathComponent
+        let displayName = (plist?["CFBundleDisplayName"] as? String)
+            ?? (plist?["CFBundleName"] as? String)
+            ?? finderName
+
+        var matchingNames = Set<String>()
+        for candidate in [
+            finderName,
+            diskName,
+            displayName,
+            plist?["CFBundleName"] as? String,
+            plist?["CFBundleExecutable"] as? String
+        ].compactMap({ $0 }) {
+            let normalized = normalizeAppIdentifier(candidate)
+            if normalized.count >= 4 {
+                matchingNames.insert(normalized)
+            }
+        }
+
+        var relatedIdentifiers = Set<String>()
+        var applicationGroups = Set<String>()
+        if let bundleIdentifier {
+            relatedIdentifiers.insert(bundleIdentifier.lowercased())
+        }
+        if includingAssociations {
+            relatedIdentifiers.formUnion(Self.embeddedBundleIdentifiers(in: bundleURL))
+            let signing = Self.signingFacts(at: bundleURL)
+            relatedIdentifiers.formUnion(signing.identifiers)
+            applicationGroups = signing.applicationGroups
+        }
+        let homebrewPath = Self.homebrewCaskPath(forResolvedAppPath: resolvedPath)
+        let isSetapp = path.contains("/Applications/Setapp/")
+            || path.contains("/Setapp/")
+
+        return InstalledApplication(
+            name: displayName,
+            bundleIdentifier: bundleIdentifier,
+            path: path,
+            matchingNames: matchingNames,
+            relatedIdentifiers: relatedIdentifiers,
+            applicationGroups: applicationGroups,
+            managedPaths: Set([homebrewPath].compactMap { $0 }),
+            installSource: homebrewPath == nil
+                ? (isSetapp ? "Setapp" : nil)
+                : "Homebrew Cask"
+        )
+    }
+
+    enum UninstallTargetRejection: Error, Sendable {
+        case notAnApplication
+        case protectedOrUndeletable
+        case littleCleanItself
+
+        var localizedReason: String {
+            switch self {
+            case .notAnApplication:
+                String(localized: "The selection is not an application bundle.")
+            case .protectedOrUndeletable:
+                String(localized: "LittleClean refuses to remove itself or a protected system application.")
+            case .littleCleanItself:
+                String(localized: "LittleClean refuses to remove itself or a protected system application.")
+            }
+        }
+    }
+
+    func resolveUninstallTarget(
+        at appPath: String,
+        includingAssociations: Bool
+    ) -> Result<InstalledApplication, UninstallTargetRejection> {
+        let standardized = URL(fileURLWithPath: appPath).standardizedFileURL
+        let path = standardized.path
+        if path == Bundle.main.bundleURL.standardizedFileURL.path {
+            return .failure(.littleCleanItself)
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              path.lowercased().hasSuffix(".app") else {
+            return .failure(.notAnApplication)
+        }
+        guard let application = makeApplication(
+            at: path,
+            includingAssociations: includingAssociations
+        ) else {
+            return .failure(.protectedOrUndeletable)
+        }
+        return .success(application)
     }
 
     private static func isProtectedSystemApplicationPath(_ resolvedPath: String) -> Bool {
@@ -1118,6 +1209,67 @@ nonisolated struct FileSystemScanner: Sendable {
             return uninstallItem(for: application, relatedPaths: relatedPaths)
         }
         return (enriched, associationResult.accessDenied)
+    }
+
+    nonisolated struct BackgroundUninstallPlan: Sendable {
+        let item: CategoryItem
+        let accessDenied: Bool
+    }
+
+    nonisolated struct BackgroundUninstallSkip: Sendable {
+        let path: String
+        let reason: String
+    }
+
+    // Build uninstall CategoryItems for Finder-selected .app paths, including associations.
+    // Peers are indexed lightly (plist only) so Finder Services stay responsive; only the
+    // selected targets pay for signing / helper-bundle association enrichment.
+    func makeUninstallPlans(
+        forAppPaths appPaths: [String]
+    ) -> (plans: [BackgroundUninstallPlan], skipped: [BackgroundUninstallSkip]) {
+        var applicationsByPath = Dictionary(
+            uniqueKeysWithValues: InstalledAppIndex.shared
+                .associationPeerApplications()
+                .map { ($0.path, $0) }
+        )
+        var targets: [InstalledApplication] = []
+        var skipped: [BackgroundUninstallSkip] = []
+        var seenTargets = Set<String>()
+
+        for rawPath in appPaths {
+            let path = URL(fileURLWithPath: rawPath).standardizedFileURL.path
+            guard seenTargets.insert(path).inserted else { continue }
+
+            switch InstalledAppIndex.shared.resolveUninstallTarget(
+                at: path,
+                includingAssociations: true
+            ) {
+            case .success(let application):
+                applicationsByPath[application.path] = application
+                targets.append(application)
+            case .failure(let rejection):
+                skipped.append(BackgroundUninstallSkip(
+                    path: path,
+                    reason: rejection.localizedReason
+                ))
+            }
+        }
+
+        guard !targets.isEmpty else {
+            return ([], skipped)
+        }
+
+        let associationResult = findAssociatedPaths(for: Array(applicationsByPath.values))
+        let plans = targets.map { application in
+            let relatedPaths = (associationResult.paths[application.path] ?? [])
+                .union(application.managedPaths)
+                .sorted()
+            return BackgroundUninstallPlan(
+                item: uninstallItem(for: application, relatedPaths: relatedPaths),
+                accessDenied: associationResult.accessDenied
+            )
+        }
+        return (plans, skipped)
     }
 
     func measureUninstallApplication(_ item: CategoryItem) -> CategoryItem {
