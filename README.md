@@ -17,6 +17,13 @@ Alternatively, you can clone the repository and build via Xcode.
 ### 🗑 Uninstall Apps
 Easily and completely remove unwanted applications along with their associated caches, preferences, and leftovers.
 
+You can also uninstall from Finder without opening the LittleClean window:
+1. Launch LittleClean once so macOS can register its system service.
+2. In Finder, select one or more `.app` bundles.
+3. Choose **Services → Uninstall with LittleClean** from the context menu (or the Finder **Services** menu).
+4. Review the confirmation dialog: the app bundle and related items are listed, and you can uncheck leftovers you want to keep. The `.app` itself cannot be unchecked.
+5. Confirm to move the selected items to Trash. Running apps are quit first. On success, no extra dialog is shown; failures still report an error.
+
 ### 🧹 Safe Cleanup
 LittleClean categorizes and safely cleans up unnecessary files occupying your disk:
 - **System Trash & Logs:** Empty the trash bin and clear system logs.
