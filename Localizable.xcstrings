@@ -150,12 +150,6 @@
         }
       }
     },
-    "Application bundles to uninstall" : {
-
-    },
-    "Applications" : {
-
-    },
     "Cache" : {
       "localizations" : {
         "zh-Hans" : {
@@ -385,6 +379,7 @@
 
     },
     "Move selected applications and their related leftovers to Trash." : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -744,9 +739,6 @@
           }
         }
       }
-    },
-    "Uninstall ${applications} with LittleClean" : {
-
     },
     "Uninstall app with ${applicationName}" : {
       "extractionState" : "stale",
