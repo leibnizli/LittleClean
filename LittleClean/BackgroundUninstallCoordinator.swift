@@ -182,7 +182,6 @@ private final class BackgroundUninstallConfirmationPanel: NSObject, NSWindowDele
         window.title = String(localized: "Uninstall Selected Apps?")
         window.minSize = NSSize(width: 640, height: 360)
         window.isReleasedWhenClosed = false
-        window.setFrameAutosaveName(Self.frameAutosaveName)
         window.delegate = self
         window.contentViewController = NSHostingController(
             rootView: UninstallConfirmationView(
@@ -191,6 +190,11 @@ private final class BackgroundUninstallConfirmationPanel: NSObject, NSWindowDele
                 onUninstall: { [weak self] in self?.finish(true) }
             )
         )
+        // Assign the autosave name *after* the content view controller. NSHostingController
+        // resizes the window to its content's preferred size when assigned, which would
+        // clobber any frame the autosave name just restored. Setting it last lets the
+        // restore win, so the window reopens at the user's last size and position.
+        window.setFrameAutosaveName(Self.frameAutosaveName)
     }
 
     func run() async -> Bool {
