@@ -10,6 +10,25 @@ private nonisolated func normalizeAppIdentifier(_ str: String) -> String {
         .replacingOccurrences(of: ".", with: "")
 }
 
+// Reference-typed, lock-protected mutable cell. Capturing a `let` instance of this in a
+// @Sendable or otherwise concurrently-executing closure keeps Swift 6 strict concurrency
+// satisfied for shared mutable state that cannot simply be a captured local `var`.
+private nonisolated final class LockedBox<Value>: @unchecked Sendable {
+    private var value: Value
+    private let lock = NSLock()
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    @discardableResult
+    func with<R>(_ body: (inout Value) throws -> R) rethrows -> R {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body(&value)
+    }
+}
+
 private nonisolated struct InstalledApplication: Sendable {
     let name: String
     let bundleIdentifier: String?
@@ -976,10 +995,10 @@ private nonisolated final class InstalledToolIndex: @unchecked Sendable {
         }
 
         // A profile that prompts for input or hangs must not stall the scan.
-        var output = Data()
+        let output = LockedBox<Data>(Data())
         let finished = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInitiated).async {
-            output = pipe.fileHandleForReading.readDataToEndOfFile()
+            output.with { $0 = pipe.fileHandleForReading.readDataToEndOfFile() }
             finished.signal()
         }
         guard finished.wait(timeout: .now() + 5) == .success else {
@@ -988,7 +1007,7 @@ private nonisolated final class InstalledToolIndex: @unchecked Sendable {
         }
         process.waitUntilExit()
 
-        return String(decoding: output, as: UTF8.self)
+        return String(decoding: output.with { $0 }, as: UTF8.self)
             .split(whereSeparator: \.isNewline)
             .last
             .map { $0.split(separator: ":").map(String.init) } ?? []
@@ -1017,18 +1036,19 @@ nonisolated struct FileSystemScanner: Sendable {
             return scanInstalledApplicationsForUninstall()
         }
 
-        var foundCategories: [CategoryItem] = []
-        var containerAccessDenied = false
-        let lock = NSLock()
+        let accumulator = LockedBox<(categories: [CategoryItem], containerAccessDenied: Bool)>(
+            (categories: [], containerAccessDenied: false)
+        )
         scanCategoriesIncremental(mode: mode, deferSizes: false) { update in
-            lock.lock()
-            foundCategories.append(contentsOf: update.items)
-            containerAccessDenied = containerAccessDenied || update.containerAccessDenied
-            lock.unlock()
+            accumulator.with { state in
+                state.categories.append(contentsOf: update.items)
+                state.containerAccessDenied = state.containerAccessDenied || update.containerAccessDenied
+            }
         }
+        let state = accumulator.with { $0 }
         return CategoryScanResult(
-            categories: foundCategories,
-            containerAccessDenied: containerAccessDenied
+            categories: state.categories,
+            containerAccessDenied: state.containerAccessDenied
         )
     }
 
@@ -1649,10 +1669,9 @@ nonisolated struct FileSystemScanner: Sendable {
             qos: .utility,
             attributes: .concurrent
         )
-        let ownedLock = NSLock()
-        var ownedDirs = Set<String>()
+        let ownedDirs = LockedBox<Set<String>>([])
 
-        func emitTool(_ item: CategoryItem?) {
+        let emitTool: @Sendable (CategoryItem?) -> Void = { item in
             guard let item else { return }
             let filtered = filterHomeCoveredNodes([item], coveredPaths: coveredPaths)
             guard let first = filtered.first else { return }
@@ -1665,9 +1684,7 @@ nonisolated struct FileSystemScanner: Sendable {
         queue.async {
             defer { group.leave() }
             let result = self.scanHomebrewTools(dirs: dirs)
-            ownedLock.lock()
-            ownedDirs.formUnion(result.ownedDirs)
-            ownedLock.unlock()
+            ownedDirs.with { $0.formUnion(result.ownedDirs) }
             emitTool(result.item)
         }
 
@@ -1676,9 +1693,7 @@ nonisolated struct FileSystemScanner: Sendable {
             defer { group.leave() }
             var localOwned = Set<String>()
             let item = self.scanNodeInstalls(dirs: dirs, ownedDirs: &localOwned)
-            ownedLock.lock()
-            ownedDirs.formUnion(localOwned)
-            ownedLock.unlock()
+            ownedDirs.with { $0.formUnion(localOwned) }
             emitTool(item)
         }
 
@@ -1686,9 +1701,7 @@ nonisolated struct FileSystemScanner: Sendable {
         queue.async {
             defer { group.leave() }
             let result = self.scanPnpmTools(dirs: dirs)
-            ownedLock.lock()
-            ownedDirs.formUnion(result.ownedDirs)
-            ownedLock.unlock()
+            ownedDirs.with { $0.formUnion(result.ownedDirs) }
             emitTool(result.item)
         }
 
@@ -1696,9 +1709,7 @@ nonisolated struct FileSystemScanner: Sendable {
         queue.async {
             defer { group.leave() }
             let result = self.scanYarnTools(dirs: dirs)
-            ownedLock.lock()
-            ownedDirs.formUnion(result.ownedDirs)
-            ownedLock.unlock()
+            ownedDirs.with { $0.formUnion(result.ownedDirs) }
             emitTool(result.item)
         }
 
@@ -1706,9 +1717,7 @@ nonisolated struct FileSystemScanner: Sendable {
         queue.async {
             defer { group.leave() }
             let result = self.scanCargoTools(dirs: dirs)
-            ownedLock.lock()
-            ownedDirs.formUnion(result.ownedDirs)
-            ownedLock.unlock()
+            ownedDirs.with { $0.formUnion(result.ownedDirs) }
             emitTool(result.item)
         }
 
@@ -1722,9 +1731,7 @@ nonisolated struct FileSystemScanner: Sendable {
         queue.async {
             defer { group.leave() }
             let result = self.scanGoTools(dirs: dirs)
-            ownedLock.lock()
-            ownedDirs.formUnion(result.ownedDirs)
-            ownedLock.unlock()
+            ownedDirs.with { $0.formUnion(result.ownedDirs) }
             emitTool(result.item)
         }
 
@@ -1746,28 +1753,28 @@ nonisolated struct FileSystemScanner: Sendable {
 
         group.wait()
 
-        ownedLock.lock()
-        let finalOwned = ownedDirs
-        ownedLock.unlock()
+        let finalOwned = ownedDirs.with { $0 }
         emitTool(scanOtherPathTools(dirs: dirs, ownedDirs: finalOwned))
     }
 
     // Build read-only informational sections synchronously on a background queue.
     func scanDetails() -> DetailScanResult {
-        var toolChildren: [CategoryItem] = []
-        var homeChildren: [CategoryItem] = []
-        let lock = NSLock()
+        let accumulator = LockedBox<(tool: [CategoryItem], home: [CategoryItem])>(
+            (tool: [], home: [])
+        )
         scanDetailsIncremental { update in
-            lock.lock()
-            defer { lock.unlock() }
-            switch update.section {
-            case .installedTools:
-                toolChildren.append(update.child)
-            case .homeDirectory:
-                homeChildren.append(update.child)
+            accumulator.with { state in
+                switch update.section {
+                case .installedTools:
+                    state.tool.append(update.child)
+                case .homeDirectory:
+                    state.home.append(update.child)
+                }
             }
         }
 
+        var toolChildren = accumulator.with { $0.tool }
+        var homeChildren = accumulator.with { $0.home }
         var items: [CategoryItem] = []
         if !toolChildren.isEmpty {
             toolChildren.sort { $0.sizeBytes > $1.sizeBytes }
@@ -1803,15 +1810,12 @@ nonisolated struct FileSystemScanner: Sendable {
         var result = item
         if let children = item.children, !children.isEmpty {
             let count = children.count
-            var measured = [CategoryItem?](repeating: nil, count: count)
-            let lock = NSLock()
+            let measured = LockedBox<[CategoryItem?]>([CategoryItem?](repeating: nil, count: count))
             DispatchQueue.concurrentPerform(iterations: count) { index in
                 let child = measurePendingSizes(children[index])
-                lock.lock()
-                measured[index] = child
-                lock.unlock()
+                measured.with { $0[index] = child }
             }
-            let resolved = measured.compactMap { $0 }
+            let resolved = measured.with { $0.compactMap { $0 } }
             result.children = resolved
             let total = resolved.reduce(Int64(0)) { $0 + $1.sizeBytes }
             result.sizeBytes = total
