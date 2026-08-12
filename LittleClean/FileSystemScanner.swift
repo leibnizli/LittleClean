@@ -2928,7 +2928,7 @@ nonisolated struct FileSystemScanner: Sendable {
         let url = URL(fileURLWithPath: path)
         guard let enumerator = FileManager.default.enumerator(
             at: url,
-            includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey],
+            includingPropertiesForKeys: Self.diskUsageResourceKeys + [.isDirectoryKey],
             errorHandler: { _, error in
                 accessDenied = accessDenied || isPermissionDenied(error)
                 return true
@@ -2939,10 +2939,10 @@ nonisolated struct FileSystemScanner: Sendable {
 
         var totalBytes: Int64 = 0
         for case let fileURL as URL in enumerator {
-            if let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]),
+            if let values = try? fileURL.resourceValues(forKeys: Set(Self.diskUsageResourceKeys + [.isDirectoryKey])),
                values.isDirectory == false,
-               let size = values.fileSize {
-                totalBytes += Int64(size)
+               let size = Self.diskUsageBytes(from: values) {
+                totalBytes += size
             }
         }
         return (totalBytes, accessDenied)
@@ -3931,12 +3931,27 @@ nonisolated struct FileSystemScanner: Sendable {
     }
 
 
+    // Prefer on-disk allocation over logical size so sparse VM images
+    // (OrbStack / Colima / Docker Desktop) report real usage, not capacity.
+    private static let diskUsageResourceKeys: [URLResourceKey] = [
+        .totalFileAllocatedSizeKey,
+        .fileAllocatedSizeKey,
+        .fileSizeKey
+    ]
+
+    private static func diskUsageBytes(from values: URLResourceValues) -> Int64? {
+        if let size = values.totalFileAllocatedSize { return Int64(size) }
+        if let size = values.fileAllocatedSize { return Int64(size) }
+        if let size = values.fileSize { return Int64(size) }
+        return nil
+    }
+
     func calculateDirectorySize(at path: String, isDirectory: Bool) -> Int64 {
         let url = URL(fileURLWithPath: path)
         if !isDirectory {
-            if let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
-               let size = values.fileSize {
-                return Int64(size)
+            if let values = try? url.resourceValues(forKeys: Set(Self.diskUsageResourceKeys)),
+               let size = Self.diskUsageBytes(from: values) {
+                return size
             }
             return 0
         }
@@ -3944,15 +3959,15 @@ nonisolated struct FileSystemScanner: Sendable {
         let fileManager = FileManager.default
         guard let enumerator = fileManager.enumerator(
             at: url,
-            includingPropertiesForKeys: [.fileSizeKey, .isDirectoryKey]
+            includingPropertiesForKeys: Self.diskUsageResourceKeys + [.isDirectoryKey]
         ) else { return 0 }
 
         var totalSize: Int64 = 0
         for case let fileURL as URL in enumerator {
-            if let values = try? fileURL.resourceValues(forKeys: [.fileSizeKey, .isDirectoryKey]),
+            if let values = try? fileURL.resourceValues(forKeys: Set(Self.diskUsageResourceKeys + [.isDirectoryKey])),
                let isDir = values.isDirectory, !isDir,
-               let size = values.fileSize {
-                totalSize += Int64(size)
+               let size = Self.diskUsageBytes(from: values) {
+                totalSize += size
             }
         }
         return totalSize
