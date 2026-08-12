@@ -179,7 +179,7 @@ private final class BackgroundUninstallConfirmationPanel: NSObject, NSWindowDele
         )
         super.init()
 
-        window.title = String(localized: "Uninstall Selected Apps?")
+        window.title = Self.windowTitle(for: plans)
         window.minSize = NSSize(width: 640, height: 360)
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -224,6 +224,23 @@ private final class BackgroundUninstallConfirmationPanel: NSObject, NSWindowDele
     private static let frameAutosaveName = "BackgroundUninstallConfirmation"
     private static var frameAutosaveDefaultsKey: String {
         "NSWindow Frame \(frameAutosaveName)"
+    }
+
+    private static func windowTitle(
+        for plans: [FileSystemScanner.BackgroundUninstallPlan]
+    ) -> String {
+        let names = plans.map(\.item.name)
+        switch names.count {
+        case 0:
+            return String(localized: "Uninstall Selected Apps?")
+        case 1:
+            return String(localized: "Uninstall \(names[0])?")
+        case 2:
+            return String(localized: "Uninstall \(names[0]) and \(names[1])?")
+        default:
+            let remaining = names.count - 1
+            return String(localized: "Uninstall \(names[0]) and \(remaining) more?")
+        }
     }
 
     private static func noteText(for child: CategoryItem) -> String {
@@ -312,14 +329,14 @@ private struct UninstallConfirmationView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                .width(min: 100, ideal: 160, max: 280)
+                .width(min: 100, ideal: 120, max: 280)
 
                 TableColumn("Size") { row in
                     Text(row.sizeString)
                         .font(.system(size: 13, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
-                .width(min: 70, ideal: 90, max: 140)
+                .width(min: 50, ideal: 70, max: 90)
 
                 TableColumn("") { row in
                     Button {
@@ -331,7 +348,7 @@ private struct UninstallConfirmationView: View {
                     .controlSize(.small)
                     .help(Text("Reveal in Finder"))
                 }
-                .width(min: 40, ideal: 50, max: 60)
+                .width(min: 30, ideal: 30, max: 30)
             }
             .tableStyle(.inset(alternatesRowBackgrounds: true))
             .selectionDisabled()

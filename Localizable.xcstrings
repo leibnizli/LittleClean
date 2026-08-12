@@ -799,6 +799,36 @@
         }
       }
     },
+    "Uninstall %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载 %@？"
+          }
+        }
+      }
+    },
+    "Uninstall %@ and %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载 %@ 和 %@？"
+          }
+        }
+      }
+    },
+    "Uninstall %@ and %lld more?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载 %@ 及另外 %lld 个？"
+          }
+        }
+      }
+    },
     "Uninstall with ${applicationName}" : {
       "extractionState" : "stale",
       "localizations" : {
