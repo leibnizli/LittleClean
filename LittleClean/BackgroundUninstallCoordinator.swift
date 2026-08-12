@@ -1,5 +1,7 @@
 import AppKit
+import Combine
 import Foundation
+import SwiftUI
 
 /// Runs uninstall from Finder Services / App Intents without presenting the main window.
 @MainActor
@@ -35,7 +37,14 @@ final class BackgroundUninstallCoordinator {
         }
 
         let result = await Task.detached(priority: .userInitiated) { [scanner] in
-            scanner.makeUninstallPlans(forAppPaths: appPaths)
+            let planned = scanner.makeUninstallPlans(forAppPaths: appPaths)
+            let measured = planned.plans.map { plan in
+                FileSystemScanner.BackgroundUninstallPlan(
+                    item: scanner.measureUninstallApplication(plan.item),
+                    accessDenied: plan.accessDenied
+                )
+            }
+            return (plans: measured, skipped: planned.skipped)
         }.value
 
         guard !result.plans.isEmpty else {
@@ -55,9 +64,7 @@ final class BackgroundUninstallCoordinator {
             plans: result.plans,
             skipped: result.skipped
         )
-        NSApp.activate(ignoringOtherApps: true)
-        // NSAlert returns alertFirstButtonReturn (1000), not .OK (1).
-        guard panel.runModal() == .alertFirstButtonReturn else { return }
+        guard await panel.run() else { return }
 
         let items = ContentViewModel.collectCleanableSelected(
             from: result.plans.map(\.item),
@@ -98,155 +105,256 @@ final class BackgroundUninstallCoordinator {
     }
 }
 
-// MARK: - Confirmation panel
+// MARK: - Confirmation window
 
 @MainActor
-private final class BackgroundUninstallConfirmationPanel: NSObject, NSTableViewDataSource, NSTableViewDelegate {
-    private struct Row {
+private final class ConfirmationModel: ObservableObject {
+    struct Row: Identifiable {
         let id: UUID
-        let title: String
-        let subtitle: String
+        let path: String
+        let note: String
+        let sizeString: String
         let isRequired: Bool
-        var isSelected: Bool
+        var isChecked: Bool
     }
 
-    private var rows: [Row]
-    private let skippedSummary: String
-    private let alert = NSAlert()
-    private let tableView = NSTableView()
-    private let checkboxColumnID = NSUserInterfaceItemIdentifier("checkbox")
-    private let titleColumnID = NSUserInterfaceItemIdentifier("title")
+    @Published var rows: [Row]
+    let info: String
+
+    init(rows: [Row], info: String) {
+        self.rows = rows
+        self.info = info
+    }
+}
+
+@MainActor
+private final class BackgroundUninstallConfirmationPanel: NSObject, NSWindowDelegate {
+    private let model: ConfirmationModel
+    private let window: NSWindow
+    private var continuation: CheckedContinuation<Bool, Never>?
 
     var selectedDetailIDs: Set<UUID> {
-        Set(rows.filter(\.isSelected).map(\.id))
+        Set(model.rows.filter(\.isChecked).map(\.id))
     }
 
     init(
         plans: [FileSystemScanner.BackgroundUninstallPlan],
         skipped: [FileSystemScanner.BackgroundUninstallSkip]
     ) {
-        rows = plans.flatMap { plan in
-            (plan.item.children ?? []).compactMap { child -> Row? in
+        let rows = plans.flatMap { plan in
+            (plan.item.children ?? []).compactMap { child -> ConfirmationModel.Row? in
                 guard child.isSelectionDetail else { return nil }
-                return Row(
+                return ConfirmationModel.Row(
                     id: child.id,
-                    title: child.pathDescription,
-                    subtitle: "\(plan.item.name) · \(child.name)",
+                    path: child.pathDescription,
+                    note: Self.noteText(for: child),
+                    sizeString: child.sizeString,
                     isRequired: child.isRequiredSelectionDetail,
-                    isSelected: true
+                    isChecked: true
                 )
             }
         }
-        skippedSummary = skipped
-            .map { "\(($0.path as NSString).lastPathComponent): \($0.reason)" }
-            .joined(separator: "\n")
-        super.init()
-        configureAlert(accessDenied: plans.contains(where: \.accessDenied))
-    }
 
-    func runModal() -> NSApplication.ModalResponse {
-        alert.runModal()
-    }
-
-    private func configureAlert(accessDenied: Bool) {
-        alert.messageText = String(localized: "Uninstall Selected Apps?")
         var info = String(
             localized: "The selected application bundle and checked related items will be moved to Trash. Running apps will be quit first."
         )
-        if accessDenied {
-            info += "\n\n" + String(
+        if plans.contains(where: \.accessDenied) {
+            info += "\n" + String(
                 localized: "Some related folders could not be scanned. Grant Full Disk Access for a more complete cleanup."
             )
         }
+        let skippedSummary = skipped
+            .map { "\(($0.path as NSString).lastPathComponent): \($0.reason)" }
+            .joined(separator: "\n")
         if !skippedSummary.isEmpty {
-            info += "\n\n" + String(localized: "Skipped:") + "\n" + skippedSummary
+            info += "\n" + String(localized: "Skipped:") + "\n" + skippedSummary
         }
-        alert.informativeText = info
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: String(localized: "Uninstall"))
-        alert.addButton(withTitle: String(localized: "Cancel"))
 
-        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 220))
-        scrollView.hasVerticalScroller = true
-        scrollView.borderType = .bezelBorder
-        scrollView.drawsBackground = true
+        model = ConfirmationModel(rows: rows, info: info)
+        window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 520),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        super.init()
 
-        tableView.headerView = nil
-        tableView.allowsEmptySelection = true
-        tableView.allowsMultipleSelection = false
-        tableView.backgroundColor = .textBackgroundColor
-        tableView.rowHeight = 36
-        tableView.dataSource = self
-        tableView.delegate = self
-
-        let checkboxColumn = NSTableColumn(identifier: checkboxColumnID)
-        checkboxColumn.width = 28
-        tableView.addTableColumn(checkboxColumn)
-
-        let titleColumn = NSTableColumn(identifier: titleColumnID)
-        titleColumn.width = 480
-        tableView.addTableColumn(titleColumn)
-
-        scrollView.documentView = tableView
-        alert.accessoryView = scrollView
+        window.title = String(localized: "Uninstall Selected Apps?")
+        window.minSize = NSSize(width: 640, height: 360)
+        window.isReleasedWhenClosed = false
+        window.setFrameAutosaveName(Self.frameAutosaveName)
+        window.delegate = self
+        window.contentViewController = NSHostingController(
+            rootView: UninstallConfirmationView(
+                model: model,
+                onCancel: { [weak self] in self?.finish(false) },
+                onUninstall: { [weak self] in self?.finish(true) }
+            )
+        )
     }
 
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        rows.count
-    }
-
-    func tableView(
-        _ tableView: NSTableView,
-        viewFor tableColumn: NSTableColumn?,
-        row: Int
-    ) -> NSView? {
-        guard let tableColumn else { return nil }
-        let item = rows[row]
-
-        if tableColumn.identifier == checkboxColumnID {
-            let identifier = NSUserInterfaceItemIdentifier("CheckboxCell")
-            let button: NSButton
-            if let reused = tableView.makeView(withIdentifier: identifier, owner: self) as? NSButton {
-                button = reused
-            } else {
-                button = NSButton(checkboxWithTitle: "", target: self, action: #selector(checkboxToggled(_:)))
-                button.identifier = identifier
+    func run() async -> Bool {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            if UserDefaults.standard.string(forKey: Self.frameAutosaveDefaultsKey) == nil {
+                window.center()
             }
-            button.state = item.isSelected ? .on : .off
-            button.isEnabled = !item.isRequired
-            button.tag = row
-            return button
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
         }
-
-        let identifier = NSUserInterfaceItemIdentifier("TitleCell")
-        let cell: NSTableCellView
-        if let reused = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView {
-            cell = reused
-        } else {
-            cell = NSTableCellView()
-            cell.identifier = identifier
-            let textField = NSTextField(labelWithString: "")
-            textField.lineBreakMode = .byTruncatingMiddle
-            textField.translatesAutoresizingMaskIntoConstraints = false
-            cell.addSubview(textField)
-            cell.textField = textField
-            NSLayoutConstraint.activate([
-                textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
-                textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-                textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
-            ])
-        }
-        cell.textField?.stringValue = item.title
-        cell.textField?.toolTip = item.subtitle
-        return cell
     }
 
-    @objc private func checkboxToggled(_ sender: NSButton) {
-        let row = sender.tag
-        guard rows.indices.contains(row), !rows[row].isRequired else {
-            sender.state = .on
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        finish(false)
+        return true
+    }
+
+    private func finish(_ confirmed: Bool) {
+        guard let continuation else { return }
+        self.continuation = nil
+        window.saveFrame(usingName: Self.frameAutosaveName)
+        window.orderOut(nil)
+        continuation.resume(returning: confirmed)
+    }
+
+    private static let frameAutosaveName = "BackgroundUninstallConfirmation"
+    private static var frameAutosaveDefaultsKey: String {
+        "NSWindow Frame \(frameAutosaveName)"
+    }
+
+    private static func noteText(for child: CategoryItem) -> String {
+        if child.isRequiredSelectionDetail {
+            return String(localized: "Application Bundle")
+        }
+        let path = child.pathDescription
+        if path.contains("/Library/Group Containers/") {
+            return String(localized: "App Group Container")
+        }
+        if path.contains("/Library/Containers/") {
+            return String(localized: "App Container")
+        }
+        if path.contains("/Library/Preferences/") {
+            return String(localized: "Preferences")
+        }
+        if path.contains("/Library/Caches/") {
+            return String(localized: "Cache")
+        }
+        if path.contains("/Library/Logs/") {
+            return String(localized: "Log")
+        }
+        if path.contains("/Library/LaunchAgents/")
+            || path.contains("/Library/LaunchDaemons/") {
+            return String(localized: "Launch Agent")
+        }
+        if path.contains("/Library/Application Support/")
+            || path.contains("/Library/Application Scripts/") {
+            return String(localized: "Related App Data")
+        }
+        if path.contains("/Library/Saved Application State/") {
+            return String(localized: "Saved App State")
+        }
+        return String(localized: "Related App Data")
+    }
+}
+
+private struct UninstallConfirmationView: View {
+    @ObservedObject var model: ConfirmationModel
+    let onCancel: () -> Void
+    let onUninstall: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(model.info)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Table(model.rows) {
+                TableColumn("Path") { row in
+                    HStack(spacing: 6) {
+                        Button {
+                            toggle(row)
+                        } label: {
+                            Image(
+                                systemName: row.isChecked
+                                    ? "checkmark.square.fill"
+                                    : "square"
+                            )
+                            .foregroundColor(
+                                row.isRequired
+                                    ? .secondary
+                                    : Color(NSColor.controlAccentColor)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(row.isRequired)
+                        .help(
+                            row.isRequired
+                                ? Text("The application bundle is required.")
+                                : Text("Include this related file in the uninstall plan.")
+                        )
+
+                        Text(verbatim: row.path)
+                            .font(.system(size: 13))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(row.path)
+                    }
+                }
+
+                TableColumn("Note") { row in
+                    Text(row.note)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .width(min: 100, ideal: 160, max: 280)
+
+                TableColumn("Size") { row in
+                    Text(row.sizeString)
+                        .font(.system(size: 13, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+                .width(min: 70, ideal: 90, max: 140)
+
+                TableColumn("") { row in
+                    Button {
+                        reveal(row.path)
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .help(Text("Reveal in Finder"))
+                }
+                .width(min: 40, ideal: 50, max: 60)
+            }
+            .tableStyle(.inset(alternatesRowBackgrounds: true))
+            .selectionDisabled()
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Uninstall", role: .destructive, action: onUninstall)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 640, minHeight: 360)
+    }
+
+    private func toggle(_ row: ConfirmationModel.Row) {
+        guard !row.isRequired,
+              let index = model.rows.firstIndex(where: { $0.id == row.id }) else {
             return
         }
-        rows[row].isSelected = sender.state == .on
+        model.rows[index].isChecked.toggle()
+    }
+
+    private func reveal(_ path: String) {
+        let expanded = (path as NSString).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: expanded) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: expanded)])
     }
 }

@@ -15,9 +15,22 @@
 		84D15170301A0B1200CB98EE /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		84D15172301A0B1300CB98EE /* Exceptions for "LittleClean" folder in "LittleClean" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 84AB243130178C1F00782FA0 /* LittleClean */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		84AB243430178C1F00782FA0 /* LittleClean */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				84D15172301A0B1300CB98EE /* Exceptions for "LittleClean" folder in "LittleClean" target */,
+			);
 			path = LittleClean;
 			sourceTree = "<group>";
 		};

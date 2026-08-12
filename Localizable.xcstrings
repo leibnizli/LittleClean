@@ -110,6 +110,16 @@
         }
       }
     },
+    "App Group Container" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用组容器"
+          }
+        }
+      }
+    },
     "App Data" : {
       "localizations" : {
         "zh-Hans" : {
@@ -161,7 +171,14 @@
       }
     },
     "Cancel" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消"
+          }
+        }
+      }
     },
     "Clean" : {
       "localizations" : {

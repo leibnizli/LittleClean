@@ -1383,8 +1383,10 @@ nonisolated struct FileSystemScanner: Sendable {
     }
 
     private func associatedPathDescription(_ path: String) -> LocalizedStringKey {
-        if path.contains("/Library/Containers/")
-            || path.contains("/Library/Group Containers/") {
+        if path.contains("/Library/Group Containers/") {
+            return "App Group Container"
+        }
+        if path.contains("/Library/Containers/") {
             return "App Container"
         }
         if path.contains("/Library/Preferences/") {
