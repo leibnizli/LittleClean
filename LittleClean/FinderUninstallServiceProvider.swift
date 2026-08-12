@@ -11,10 +11,17 @@ final class FinderUninstallServiceProvider: NSObject {
         let urls = Self.fileURLs(from: pboard)
         guard !urls.isEmpty else {
             error.pointee = String(localized: "The selection is not an application bundle.") as NSString
+            // Launched for a service with nothing to do: quit the background
+            // instance instead of leaving it running invisibly.
+            Task { @MainActor in
+                BackgroundUninstallCoordinator.shared.receivedServiceRequest = true
+                AppDelegate.shared?.finishBackgroundUninstall()
+            }
             return
         }
 
         Task { @MainActor in
+            BackgroundUninstallCoordinator.shared.receivedServiceRequest = true
             await BackgroundUninstallCoordinator.shared.handle(appURLs: urls)
         }
     }

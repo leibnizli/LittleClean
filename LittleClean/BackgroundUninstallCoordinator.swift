@@ -9,6 +9,10 @@ final class BackgroundUninstallCoordinator {
     static let shared = BackgroundUninstallCoordinator()
 
     private(set) var isBusy = false
+    /// True once a real Finder Service request has arrived. The AppDelegate
+    /// launch watchdog reads this to tell a genuine service launch apart from a
+    /// no-op relaunch, so the app does not linger as an invisible accessory.
+    var receivedServiceRequest = false
     private let scanner = FileSystemScanner()
     private let cleaner = Cleaner()
 
