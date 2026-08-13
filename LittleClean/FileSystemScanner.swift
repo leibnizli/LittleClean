@@ -1691,6 +1691,14 @@ nonisolated struct FileSystemScanner: Sendable {
         group.enter()
         queue.async {
             defer { group.leave() }
+            let result = self.scanMacPortsTools(dirs: dirs)
+            ownedDirs.with { $0.formUnion(result.ownedDirs) }
+            emitTool(result.item)
+        }
+
+        group.enter()
+        queue.async {
+            defer { group.leave() }
             var localOwned = Set<String>()
             let item = self.scanNodeInstalls(dirs: dirs, ownedDirs: &localOwned)
             ownedDirs.with { $0.formUnion(localOwned) }
@@ -2164,7 +2172,11 @@ nonisolated struct FileSystemScanner: Sendable {
         ".swiftpm": "Swift Packages", ".switchhosts": "Hosts Manager", ".shadowsocksx-ng": "Proxy Tool",
         ".mitmproxy": "Packet Sniffer", ".termora": "Terminal Tool", ".harmony": "HarmonyOS Dev",
         ".ohos": "HarmonyOS Dev", ".ohpm": "HarmonyOS Packages", ".hvigor": "HarmonyOS Build", ".aliyun": "Aliyun CLI",
-        "flutter": "Flutter SDK", "venvs": "Python Venvs", "androidstudioprojects": "Android Projects",
+        "flutter": "Flutter SDK",
+        "venvs": "Python Venvs", ".virtualenvs": "Python Venvs", ".venvs": "Python Venvs", ".envs": "Python Venvs",
+        "miniconda3": "Conda", "anaconda3": "Conda", "miniforge3": "Conda", "mambaforge3": "Conda",
+        "miniconda": "Conda", "anaconda": "Conda", "miniforge": "Conda", "mambaforge": "Conda",
+        "androidstudioprojects": "Android Projects",
         "wechatprojects": "WeChat Projects", "codegeexprojects": "CodeGeeX Projects",
         "writersideprojects": "Writerside Projects", "postman": "API Testing", "plugins": "Plugins",
         "creative cloud files": "Adobe Cloud Files", "yarn.lock": "Dependency Lock",
@@ -2268,6 +2280,17 @@ nonisolated struct FileSystemScanner: Sendable {
         ".codegeex": ("sparkles", .purple),
         ".writerside": ("book.fill", .blue),
         "venvs": ("curlybraces", .yellow),
+        ".virtualenvs": ("curlybraces", .yellow),
+        ".venvs": ("curlybraces", .yellow),
+        ".envs": ("curlybraces", .yellow),
+        "miniconda3": ("leaf.fill", .green),
+        "anaconda3": ("leaf.fill", .green),
+        "miniforge3": ("leaf.fill", .green),
+        "mambaforge3": ("leaf.fill", .green),
+        "miniconda": ("leaf.fill", .green),
+        "anaconda": ("leaf.fill", .green),
+        "miniforge": ("leaf.fill", .green),
+        "mambaforge": ("leaf.fill", .green),
         "androidstudioprojects": ("candybarphone", .green),
         "wechatprojects": ("bubble.left.fill", .green),
         "codegeexprojects": ("sparkles", .purple),
@@ -3506,6 +3529,75 @@ nonisolated struct FileSystemScanner: Sendable {
         )
     }
 
+    private func scanMacPortsTools(dirs: [String]) -> (item: CategoryItem?, ownedDirs: Set<String>) {
+        var ownedDirs = Set<String>()
+        guard let portPath = locateBinary("port", in: dirs) else {
+            return (nil, ownedDirs)
+        }
+        let portBin = (portPath as NSString).deletingLastPathComponent
+        ownedDirs.insert(portBin)
+        // MacPorts prefix (e.g. /opt/local) is the parent of its bin dir.
+        let prefix = (portBin as NSString).deletingLastPathComponent
+        let sbin = (prefix as NSString).appendingPathComponent("sbin")
+        if dirs.contains(sbin) { ownedDirs.insert(sbin) }
+        let software = (prefix as NSString).appendingPathComponent("var/macports/software")
+        let distfiles = (prefix as NSString).appendingPathComponent("var/macports/distfiles")
+        let build = (prefix as NSString).appendingPathComponent("var/macports/build")
+
+        var portLeaves: [CategoryItem] = []
+        var seenPorts = Set<String>()
+        if let out = runCommandCapture(portPath, ["installed"]) {
+            for raw in out.split(separator: "\n") {
+                let line = String(raw).trimmingCharacters(in: .whitespaces)
+                if line.isEmpty || line.hasPrefix("The following") { continue }
+                // Each port line: "name @version_0[+variants] [(active)]" — one leaf per name.
+                let tokens = line.split(separator: " ", omittingEmptySubsequences: true)
+                guard let nameTok = tokens.first, !nameTok.hasPrefix("@") else { continue }
+                let name = String(nameTok)
+                if !seenPorts.insert(name).inserted { continue }
+                let portDir = (software as NSString).appendingPathComponent(name)
+                let size = calculateDirectorySize(at: portDir, isDirectory: true)
+                portLeaves.append(leaf(name, size, finderPath: portDir))
+            }
+        }
+
+        var groups: [CategoryItem] = []
+        if !portLeaves.isEmpty {
+            portLeaves.sort { $0.sizeBytes > $1.sizeBytes }
+            groups.append(
+                displayParent(
+                    name: "Installed Ports",
+                    label: "Installed Ports (\(portLeaves.count))",
+                    icon: "shippingbox.fill",
+                    color: .teal,
+                    children: portLeaves,
+                    finderPath: software
+                )
+            )
+        }
+        let distfilesSize = calculateDirectorySize(at: distfiles, isDirectory: true)
+        if distfilesSize > 0 {
+            groups.append(leaf("Distfiles Cache", distfilesSize, finderPath: distfiles, description: LocalizedStringKey("MacPorts distfiles cache")))
+        }
+        let buildSize = calculateDirectorySize(at: build, isDirectory: true)
+        if buildSize > 0 {
+            groups.append(leaf("Build Cache", buildSize, finderPath: build, description: LocalizedStringKey("MacPorts build cache")))
+        }
+
+        guard !groups.isEmpty else { return (nil, ownedDirs) }
+        return (
+            displayParent(
+                name: "MacPorts",
+                label: "MacPorts",
+                icon: "shippingbox.fill",
+                color: .teal,
+                children: groups,
+                finderPath: prefix
+            ),
+            ownedDirs
+        )
+    }
+
     private func scanPnpmTools(dirs: [String]) -> (item: CategoryItem?, ownedDirs: Set<String>) {
         var ownedDirs = Set<String>()
         guard let pnpmPath = locateBinary("pnpm", in: dirs) else {
@@ -3784,6 +3876,10 @@ nonisolated struct FileSystemScanner: Sendable {
         ownedDirs.formUnion(brew.ownedDirs)
         if let item = brew.item { toolNodes.append(item) }
 
+        let macports = scanMacPortsTools(dirs: dirs)
+        ownedDirs.formUnion(macports.ownedDirs)
+        if let item = macports.item { toolNodes.append(item) }
+
         if let nodeNode = scanNodeInstalls(dirs: dirs, ownedDirs: &ownedDirs) {
             toolNodes.append(nodeNode)
         }
@@ -3858,15 +3954,176 @@ nonisolated struct FileSystemScanner: Sendable {
             color = .secondary
         }
 
+        let children: [CategoryItem]?
+        if entryIsDir.boolValue {
+            children = scanHomeEntryChildren(for: fullPath, parentSize: bytes)
+        } else {
+            children = nil
+        }
+
         return displayItem(
             name: entry,
             label: "~/\(entry)",
             icon: icon,
             color: color,
+            children: children,
             sizeBytes: bytes,
             finderPath: fullPath,
             description: Self.homeEntryDescriptions[lowerEntry].map { LocalizedStringKey($0) }
         )
+    }
+
+    // For known tool-environment roots directly under ~, return expandable children
+    // (individual venvs / conda envs / pipx+uv under ~/.local). Nil keeps the entry flat.
+    private func scanHomeEntryChildren(for fullPath: String, parentSize: Int64) -> [CategoryItem]? {
+        let name = (fullPath as NSString).lastPathComponent.lowercased()
+        if [".virtualenvs", ".venvs", ".envs", "venvs"].contains(name) {
+            let kids = scanVenvChildren(in: fullPath, fallbackDescription: LocalizedStringKey("Python venv"))
+            return kids.isEmpty ? nil : kids
+        }
+        if ["miniconda3", "anaconda3", "miniforge3", "mambaforge3",
+            "miniforge", "mambaforge", "miniconda", "anaconda"].contains(name) {
+            let kids = scanCondaEnvChildren(root: fullPath, rootSize: parentSize)
+            return kids.isEmpty ? nil : kids
+        }
+        if name == ".local" {
+            let kids = scanLocalChildren(in: fullPath)
+            return kids.isEmpty ? nil : kids
+        }
+        return nil
+    }
+
+    // Each subdirectory of a venv root is one virtual environment. pyvenv.cfg is preferred;
+    // dirs without it (old virtualenv) are still treated as venvs.
+    private func scanVenvChildren(in root: String, fallbackDescription: LocalizedStringKey? = nil) -> [CategoryItem] {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: root) else { return [] }
+        var nodes: [CategoryItem] = []
+        for entry in entries {
+            if entry.hasPrefix(".") { continue }
+            let venvPath = (root as NSString).appendingPathComponent(entry)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: venvPath, isDirectory: &isDir), isDir.boolValue else { continue }
+            let size = calculateDirectorySize(at: venvPath, isDirectory: true)
+            let desc = pythonVersionDescription(venvPath: venvPath) ?? fallbackDescription
+            nodes.append(leaf(entry, size, finderPath: venvPath, description: desc))
+        }
+        return nodes.sorted { $0.sizeBytes > $1.sizeBytes }
+    }
+
+    // Read the Python version from a venv's pyvenv.cfg (`version`, then `version_info`).
+    private func pythonVersionDescription(venvPath: String) -> LocalizedStringKey? {
+        let cfg = (venvPath as NSString).appendingPathComponent("pyvenv.cfg")
+        guard let content = try? String(contentsOfFile: cfg, encoding: .utf8) else { return nil }
+        var version: String?
+        var versionInfo: String?
+        for raw in content.split(separator: "\n") {
+            let line = String(raw).trimmingCharacters(in: .whitespaces)
+            guard let eq = line.firstIndex(of: "=") else { continue }
+            let key = String(line[..<eq]).trimmingCharacters(in: .whitespaces)
+            let val = String(line[line.index(after: eq)...])
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
+            if key == "version" { version = val }
+            else if key == "version_info" { versionInfo = val }
+        }
+        if let v = version, !v.isEmpty {
+            let key: LocalizedStringKey = "Python \(v)"
+            return key
+        }
+        if let v = versionInfo, !v.isEmpty {
+            let key: LocalizedStringKey = "Python \(v)"
+            return key
+        }
+        return nil
+    }
+
+    // Conda envs: the base environment + each subdir of envs/ + the pkgs package cache.
+    // Sizes are subsets of the conda root total (base = root - envs - pkgs) so nothing is
+    // double-counted against the home entry's own size. Envs whose real path is outside
+    // this root are skipped — they already appear as their own home entry.
+    private func scanCondaEnvChildren(root: String, rootSize: Int64) -> [CategoryItem] {
+        let fm = FileManager.default
+        let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+        let envsDir = (root as NSString).appendingPathComponent("envs")
+        var envNodes: [CategoryItem] = []
+        var envsTotal: Int64 = 0
+        if let entries = try? fm.contentsOfDirectory(atPath: envsDir) {
+            for entry in entries {
+                if entry.hasPrefix(".") { continue }
+                let envPath = (envsDir as NSString).appendingPathComponent(entry)
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: envPath, isDirectory: &isDir), isDir.boolValue else { continue }
+                let resolved = URL(fileURLWithPath: envPath).resolvingSymlinksInPath().path
+                if resolved != resolvedRoot && !resolved.hasPrefix(resolvedRoot + "/") {
+                    continue
+                }
+                let size = calculateDirectorySize(at: envPath, isDirectory: true)
+                envsTotal += size
+                envNodes.append(leaf(entry, size, finderPath: envPath, description: LocalizedStringKey("Conda environment")))
+            }
+        }
+        let pkgsPath = (root as NSString).appendingPathComponent("pkgs")
+        let pkgsSize = calculateDirectorySize(at: pkgsPath, isDirectory: true)
+        var children: [CategoryItem] = []
+        let baseSize = max(0, rootSize - envsTotal - pkgsSize)
+        if baseSize > 0 {
+            children.append(leaf("base", baseSize, finderPath: root, description: LocalizedStringKey("Conda base environment")))
+        }
+        children.append(contentsOf: envNodes.sorted { $0.sizeBytes > $1.sizeBytes })
+        if pkgsSize > 0 {
+            children.append(leaf("pkgs", pkgsSize, finderPath: pkgsPath, description: LocalizedStringKey("Conda package cache")))
+        }
+        return children
+    }
+
+    // ~/.local is composite: keep the parent's full size and only break out Pipx + uv tools.
+    private func scanLocalChildren(in root: String) -> [CategoryItem] {
+        var groups: [CategoryItem] = []
+
+        var pipxLeaves: [CategoryItem] = []
+        var pipxFinder: String?
+        var seenPipx = Set<String>()
+        let pipxVenvDirs = [
+            (root as NSString).appendingPathComponent("pipx/venvs"),
+            (root as NSString).appendingPathComponent("share/pipx/venvs")
+        ]
+        for dir in pipxVenvDirs {
+            for kid in scanVenvChildren(in: dir, fallbackDescription: LocalizedStringKey("Pipx tool")) {
+                if !seenPipx.insert(kid.name).inserted { continue }
+                pipxLeaves.append(kid)
+                if pipxFinder == nil { pipxFinder = dir }
+            }
+        }
+        if !pipxLeaves.isEmpty {
+            pipxLeaves.sort { $0.sizeBytes > $1.sizeBytes }
+            groups.append(
+                displayParent(
+                    name: "Pipx",
+                    label: "Pipx (\(pipxLeaves.count))",
+                    icon: "shippingbox.fill",
+                    color: .indigo,
+                    children: pipxLeaves,
+                    finderPath: pipxFinder
+                )
+            )
+        }
+
+        let uvToolsDir = (root as NSString).appendingPathComponent("share/uv/tools")
+        let uvLeaves = scanVenvChildren(in: uvToolsDir, fallbackDescription: LocalizedStringKey("uv tool"))
+        if !uvLeaves.isEmpty {
+            groups.append(
+                displayParent(
+                    name: "uv Tools",
+                    label: "uv Tools (\(uvLeaves.count))",
+                    icon: "shippingbox.fill",
+                    color: .purple,
+                    children: uvLeaves,
+                    finderPath: uvToolsDir
+                )
+            )
+        }
+        return groups
     }
 
     // Enumerate every non-system entry (file or folder, hidden or visible) directly under the

@@ -39,11 +39,11 @@ LittleClean categorizes and safely cleans up unnecessary files occupying your di
 ### Deep Analysis
 Read-only mode for complete visibility into development environments and disk usage. Nothing in this mode can be deleted:
 - **Xcode Archives & Simulators:** Inspect Xcode Archives and simulator devices grouped by runtime version.
-- **Homebrew:** Track installed Formulae and Casks.
+- **Homebrew & MacPorts:** Track Homebrew Formulae/Casks and MacPorts ports (plus MacPorts distfiles and build caches) in Installed Tools.
 - **Node.js:** Exhaustively scans for Node.js installations across all major version managers (`nvm`, `fnm`, `volta`, `asdf`, `nodenv`, `n`, Homebrew, `/usr/local`, and active PATH) to find global packages.
-- **Global Package Managers:** View global packages and their sizes for `npm`, `pnpm`, `Yarn`, `Cargo` (Rust), Ruby Gems, Go, and Pipx.
+- **Global Package Managers:** View global packages and their sizes for `npm`, `pnpm`, `Yarn`, `Cargo` (Rust), Ruby Gems, and Go.
 - **Other PATH Tools:** List additional non-system binaries found on your PATH.
-- **Home Directory Overview:** Enumerate non-system items under `~` with descriptions for known tools and configs (Docker, Rust, Android, editors, cloud CLIs, and more).
+- **Home Directory Overview:** Enumerate non-system items under `~`. Python venv roots (`~/.virtualenvs` and similar), conda installs (`~/miniconda3` and similar), and `~/.local` (Pipx and uv tools) are expandable inline.
 
 ### Search, Navigation & More
 - **Real-time Search:** Instantly filter through thousands of caches, tools, and leftovers.

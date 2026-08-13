@@ -210,6 +210,36 @@
         }
       }
     },
+    "Conda base environment" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conda 基础环境"
+          }
+        }
+      }
+    },
+    "Conda environment" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conda 环境"
+          }
+        }
+      }
+    },
+    "Conda package cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conda 包缓存"
+          }
+        }
+      }
+    },
     "Container Leftovers" : {
       "localizations" : {
         "zh-Hans" : {
@@ -389,6 +419,26 @@
         }
       }
     },
+    "MacPorts build cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacPorts 构建缓存"
+          }
+        }
+      }
+    },
+    "MacPorts distfiles cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MacPorts distfiles 缓存"
+          }
+        }
+      }
+    },
     "Missing Runtime" : {
 
     },
@@ -511,12 +561,42 @@
         }
       }
     },
+    "Pipx tool" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pipx 工具"
+          }
+        }
+      }
+    },
     "Preferences" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "偏好设置"
+          }
+        }
+      }
+    },
+    "Python %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Python %@"
+          }
+        }
+      }
+    },
+    "Python venv" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Python 虚拟环境"
           }
         }
       }
@@ -856,6 +936,16 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "Used %1$@ · Free %2$@"
+          }
+        }
+      }
+    },
+    "uv tool" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "uv 工具"
           }
         }
       }

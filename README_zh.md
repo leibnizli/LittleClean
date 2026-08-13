@@ -38,11 +38,11 @@ LittleClean 能够对占据磁盘空间的无用文件进行分类并安全清�
 ### 深度分析 (Deep Analysis)
 只读模式，完整掌握开发环境与磁盘占用情况。此模式下不可删除任何内容：
 - **Xcode Archives 与模拟器:** 查看 Xcode Archives，以及按 runtime 版本分组的模拟器设备占用。
-- **Homebrew:** 追踪已安装的 Formulae 和 Casks。
+- **Homebrew 与 MacPorts:** 在 Installed Tools 中追踪 Homebrew Formulae/Casks 以及 MacPorts ports（含 distfiles 与构建缓存）。
 - **Node.js:** 全面扫描 Node.js 安装情况，支持所有主流版本管理器（`nvm`、`fnm`、`volta`、`asdf`、`nodenv`、`n`、Homebrew、`/usr/local` 及环境变量 PATH），精准定位全局包。
-- **全局包管理器:** 查看 `npm`、`pnpm`、`Yarn`、`Cargo`（Rust）、Ruby Gems、Go、Pipx 的全局包及占用空间。
+- **全局包管理器:** 查看 `npm`、`pnpm`、`Yarn`、`Cargo`（Rust）、Ruby Gems、Go 的全局包及占用空间。
 - **其他 PATH 工具:** 列出 PATH 中其余非系统二进制工具。
-- **用户目录概览:** 枚举 `~` 下的非系统项，并为已知工具与配置（Docker、Rust、Android、编辑器、云 CLI 等）提供说明。
+- **用户目录概览:** 枚举 `~` 下的非系统项。Python venv 根目录（`~/.virtualenvs` 等）、conda 安装（`~/miniconda3` 等）以及 `~/.local`（Pipx 与 uv 工具）可展开查看明细。
 
 ### 搜索、导航与更多
 - **实时搜索:** 瞬间过滤出你想要的缓存、工具或残留项。
