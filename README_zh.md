@@ -28,12 +28,13 @@ LittleClean 是一款强大而智能的 macOS 系统清理及开发者工具管�
 ### 安全清理 (Safe Cleanup)
 LittleClean 能够对占据磁盘空间的无用文件进行分类并安全清理。勾选后点击 **Clean**，或通过右键菜单单独清理某一项：
 - **系统废纸篓与日志:** 清空废纸篓并清理系统日志。
-- **应用缓存:** 清理 `~/Library/Caches` 以释放空间。
+- **Chrome 缓存:** 清理 `~/Library/Application Support/Google/Chrome` 下可再生的 GPU、着色器与 Service Worker 缓存。`~/Library/Caches` 里的 HTTP 缓存已包含在应用缓存中。
 - **应用保存状态:** 移除应用的 Saved Application State。
 - **已卸载应用残留:** 智能检测并移除 `~/Library/Application Support` 中已经被卸载的应用残留文件。
 - **容器残留:** 检测并移除 `~/Library/Containers` 下已无主的应用容器。
+- **扩展残留:** 检测已无主的 App Extension 脚本、Internet 插件、服务、目标程序已不存在的登录项，以及宿主 App 已卸载的系统扩展。不扫描 Safari 自身数据。
 - **Xcode 清理:** 清理 DerivedData、iOS 模拟器缓存，并自动移除失效模拟器。
-- **用户目录工具缓存:** 清理主目录下已知开发工具缓存（如 npm、pnpm、Yarn、Bun、Deno、Gradle、Maven、Cargo 等），保留对应文件夹本身。
+- **用户目录工具缓存:** 清理 `~/Library/Caches` 以及主目录下已知开发工具缓存（如 npm、pnpm、Yarn、Bun、Deno、Gradle、Maven、Cargo 等），保留对应文件夹本身。
 
 ### 深度分析 (Deep Analysis)
 只读模式，完整掌握开发环境与磁盘占用情况。此模式下不可删除任何内容：

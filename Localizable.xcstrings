@@ -70,16 +70,6 @@
     "About Deep Analysis" : {
 
     },
-    "Authenticate to modify protected files." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请验证身份以修改受保护的文件。"
-          }
-        }
-      }
-    },
     "Allow LittleClean in System Settings → General → Login Items & Extensions." : {
       "localizations" : {
         "zh-Hans" : {
@@ -101,6 +91,7 @@
       }
     },
     "App Caches" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -130,22 +121,22 @@
         }
       }
     },
-    "App Group Container" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "应用组容器"
-          }
-        }
-      }
-    },
     "App Data" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "应用数据"
+          }
+        }
+      }
+    },
+    "App Group Container" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用组容器"
           }
         }
       }
@@ -180,6 +171,26 @@
         }
       }
     },
+    "Application Script" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用脚本"
+          }
+        }
+      }
+    },
+    "Authenticate to modify protected files." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请验证身份以修改受保护的文件。"
+          }
+        }
+      }
+    },
     "Cache" : {
       "localizations" : {
         "zh-Hans" : {
@@ -196,6 +207,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "取消"
+          }
+        }
+      }
+    },
+    "Chrome Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chrome 缓存"
           }
         }
       }
@@ -226,6 +247,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在清理…"
+          }
+        }
+      }
+    },
+    "Code Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代码缓存"
           }
         }
       }
@@ -336,12 +367,53 @@
         }
       }
     },
+    "Extension Leftovers" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "扩展残留"
+          }
+        }
+      }
+    },
     "Free %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "可用 %@"
+          }
+        }
+      }
+    },
+    "GPU Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GPU 缓存"
+          }
+        }
+      }
+    },
+    "GPU Persistent Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GPU 持久缓存"
+          }
+        }
+      }
+    },
+    "Graphite Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Graphite 缓存"
           }
         }
       }
@@ -362,6 +434,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Homebrew Cask 安装目录"
+          }
+        }
+      }
+    },
+    "HTTP Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP 缓存"
           }
         }
       }
@@ -432,6 +514,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "日志"
+          }
+        }
+      }
+    },
+    "Login Item" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录项"
           }
         }
       }
@@ -621,6 +713,16 @@
         }
       }
     },
+    "Protected files will ask for an administrator password." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "处理受保护文件时将要求输入管理员密码。"
+          }
+        }
+      }
+    },
     "Python %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -651,16 +753,6 @@
         }
       }
     },
-    "Protected files will ask for an administrator password." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "处理受保护文件时将要求输入管理员密码。"
-          }
-        }
-      }
-    },
     "Read Only" : {
 
     },
@@ -684,6 +776,16 @@
         }
       }
     },
+    "Registers a background helper so LittleClean can use Touch ID instead of an administrator password. macOS may ask you to allow LittleClean in Login Items & Extensions." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会注册一个后台助手，以便用 Touch ID 代替管理员密码。macOS 可能会要求你在「登录项与扩展」中允许 LittleClean。"
+          }
+        }
+      }
+    },
     "Related App Data" : {
       "localizations" : {
         "zh-Hans" : {
@@ -700,16 +802,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除已安装应用及与其匹配的用户数据。"
-          }
-        }
-      }
-    },
-    "Registers a background helper so LittleClean can use Touch ID instead of an administrator password. macOS may ask you to allow LittleClean in Login Items & Extensions." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "会注册一个后台助手，以便用 Touch ID 代替管理员密码。macOS 可能会要求你在「登录项与扩展」中允许 LittleClean。"
           }
         }
       }
@@ -794,12 +886,52 @@
         }
       }
     },
+    "Service Worker Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Service Worker 缓存"
+          }
+        }
+      }
+    },
+    "Service Worker Script Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Service Worker 脚本缓存"
+          }
+        }
+      }
+    },
+    "Shader Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "着色器缓存"
+          }
+        }
+      }
+    },
     "Size" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "大小"
+          }
+        }
+      }
+    },
+    "Skia Shader Cache" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skia 着色器缓存"
           }
         }
       }
@@ -820,6 +952,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "部分关联目录无法扫描。请授予完全磁盘访问权限以获得更完整的清理。"
+          }
+        }
+      }
+    },
+    "System Extension" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统扩展"
           }
         }
       }
@@ -884,6 +1026,16 @@
         }
       }
     },
+    "Touch ID is available for protected files." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "处理受保护文件时可以使用 Touch ID。"
+          }
+        }
+      }
+    },
     "Unavailable" : {
 
     },
@@ -893,6 +1045,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "卸载"
+          }
+        }
+      }
+    },
+    "Uninstall %@ and %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载 %@ 和 %@？"
+          }
+        }
+      }
+    },
+    "Uninstall %@ and %lld more?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载 %@ 及另外 %lld 个？"
+          }
+        }
+      }
+    },
+    "Uninstall %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载 %@？"
           }
         }
       }
@@ -939,36 +1121,6 @@
         }
       }
     },
-    "Uninstall %@?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "卸载 %@？"
-          }
-        }
-      }
-    },
-    "Uninstall %@ and %@?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "卸载 %@ 和 %@？"
-          }
-        }
-      }
-    },
-    "Uninstall %@ and %lld more?" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "卸载 %@ 及另外 %lld 个？"
-          }
-        }
-      }
-    },
     "Uninstall with ${applicationName}" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -990,36 +1142,6 @@
         }
       }
     },
-    "Used %@ · Free %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Used %1$@ · Free %2$@"
-          }
-        }
-      }
-    },
-    "uv tool" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "uv 工具"
-          }
-        }
-      }
-    },
-    "Touch ID is available for protected files." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "处理受保护文件时可以使用 Touch ID。"
-          }
-        }
-      }
-    },
     "Use Password" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1036,6 +1158,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用 Touch ID 处理受保护文件"
+          }
+        }
+      }
+    },
+    "Used %@ · Free %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Used %1$@ · Free %2$@"
+          }
+        }
+      }
+    },
+    "uv tool" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "uv 工具"
           }
         }
       }

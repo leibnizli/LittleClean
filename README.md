@@ -29,12 +29,13 @@ You can also uninstall from Finder without opening the LittleClean window:
 ### Safe Cleanup
 LittleClean categorizes and safely cleans up unnecessary files occupying your disk. Select items and click **Clean**, or use the context menu to clean a single entry:
 - **System Trash & Logs:** Empty the trash bin and clear system logs.
-- **App Caches:** Clear `~/Library/Caches` to free up space.
+- **Chrome Cache:** Clear regenerable Chrome caches under `~/Library/Application Support/Google/Chrome` (GPU, shaders, and Service Worker caches). HTTP cache in `~/Library/Caches` is already covered by App Caches.
 - **Saved App State:** Remove saved application states for a fresh start.
 - **Uninstalled App Leftovers:** Intelligently detect and remove leftovers in `~/Library/Application Support` for applications that have been uninstalled.
 - **Container Leftovers:** Detect and remove orphaned app containers under `~/Library/Containers`.
+- **Extension Leftovers:** Detect orphaned App Extension scripts, Internet Plug-Ins, Services, login items whose program is gone, and System Extensions whose host app is gone. Safari’s own data is not scanned.
 - **Xcode Cleanup:** Clear DerivedData, iOS Simulator caches, and automatically remove unavailable simulators.
-- **Home Directory Tool Caches:** Clear known developer tool caches in your home directory (for example npm, pnpm, Yarn, Bun, Deno, Gradle, Maven, and Cargo), while keeping the folders themselves.
+- **Home Directory Tool Caches:** Clear `~/Library/Caches` and known developer tool caches in your home directory (for example npm, pnpm, Yarn, Bun, Deno, Gradle, Maven, and Cargo), while keeping the folders themselves.
 
 ### Deep Analysis
 Read-only mode for complete visibility into development environments and disk usage. Nothing in this mode can be deleted:

@@ -35,13 +35,24 @@ nonisolated struct CleanRule: Identifiable, @unchecked Sendable {
     var isDynamicHomeCleanupRule: Bool = false
     var isDynamicUnavailableSimulatorRule: Bool = false
     var isDynamicContainerLeftoversRule: Bool = false
+    var isDynamicExtensionLeftoversRule: Bool = false
+    var isDynamicChromeCacheRule: Bool = false
     var isCheckboxHidden: Bool = false
     var scanMode: ScanMode = .safeCleanup
 }
 
 nonisolated struct CleanConfig {
     static let defaultRules: [CleanRule] = [
-        CleanRule(name: "App Caches", pathDescription: "~/Library/Caches", iconName: "archivebox.fill", iconColor: .orange, note: "App Caches"),
+        CleanRule(
+            name: "Chrome Cache",
+            pathDescription: "~/Library/Application Support/Google/Chrome",
+            iconName: "globe",
+            iconColor: .orange,
+            note: "Chrome Cache",
+            isDynamicChromeCacheRule: true,
+            isCheckboxHidden: true,
+            scanMode: .safeCleanup
+        ),
         CleanRule(name: "System Logs", pathDescription: "~/Library/Logs", iconName: "doc.text.fill", iconColor: .blue, note: "System Logs"),
         CleanRule(name: "System Trash", pathDescription: "~/.Trash", iconName: "trash.fill", iconColor: .red, note: "System Trash"),
         CleanRule(name: "Xcode DerivedData", pathDescription: "~/Library/Developer/Xcode/DerivedData", iconName: "hammer.fill", iconColor: .purple, note: "Xcode DerivedData"),
@@ -87,6 +98,15 @@ nonisolated struct CleanConfig {
             iconName: "shippingbox.fill",
             iconColor: .pink,
             isDynamicContainerLeftoversRule: true,
+            isCheckboxHidden: true,
+            scanMode: .safeCleanup
+        ),
+        CleanRule(
+            name: "Extension Leftovers",
+            pathDescription: "Extension Leftovers",
+            iconName: "puzzlepiece.extension.fill",
+            iconColor: .pink,
+            isDynamicExtensionLeftoversRule: true,
             isCheckboxHidden: true,
             scanMode: .safeCleanup
         ),

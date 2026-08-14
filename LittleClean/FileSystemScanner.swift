@@ -343,9 +343,10 @@ private nonisolated final class InstalledAppIndex: @unchecked Sendable {
         let relativeRoots = [
             "Contents/PlugIns",
             "Contents/XPCServices",
-            "Contents/Library/LoginItems"
+            "Contents/Library/LoginItems",
+            "Contents/Library/SystemExtensions"
         ]
-        let bundleExtensions = Set(["app", "appex", "xpc"])
+        let bundleExtensions = Set(["app", "appex", "xpc", "systemextension"])
         let fileManager = FileManager.default
         var identifiers = Set<String>()
 
@@ -1122,6 +1123,9 @@ nonisolated struct FileSystemScanner: Sendable {
         if rule.isDynamicContainerLeftoversRule {
             return scanContainerLeftovers(basePath: rule.pathDescription, deferSizes: deferSizes)
         }
+        if rule.isDynamicExtensionLeftoversRule {
+            return scanExtensionLeftovers(deferSizes: deferSizes)
+        }
         if rule.isDynamicHomeCleanupRule {
             let allChildren = scanHomeCaches(basePath: rule.pathDescription, deferSizes: deferSizes)
             guard !allChildren.isEmpty else { return ([], false) }
@@ -1138,6 +1142,9 @@ nonisolated struct FileSystemScanner: Sendable {
             )
             parent.displayPath = "~ (Caches)"
             return ([parent], false)
+        }
+        if rule.isDynamicChromeCacheRule {
+            return (scanChromeCaches(deferSizes: deferSizes), false)
         }
         guard fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) else {
             return ([], false)
@@ -1174,7 +1181,9 @@ nonisolated struct FileSystemScanner: Sendable {
     // Drop trivial entries after lazy sizing (home caches / unavailable simulators).
     func finalizeMeasuredCategory(_ item: CategoryItem) -> CategoryItem? {
         let minBytes: Int64 = 1_000_000
-        if item.rule.isDynamicHomeCleanupRule || item.rule.isDynamicUnavailableSimulatorRule {
+        if item.rule.isDynamicHomeCleanupRule
+            || item.rule.isDynamicUnavailableSimulatorRule
+            || item.rule.isDynamicChromeCacheRule {
             let children = (item.children ?? []).filter { $0.sizeBytes > minBytes }
             guard !children.isEmpty else { return nil }
             var result = item
@@ -1184,7 +1193,9 @@ nonisolated struct FileSystemScanner: Sendable {
             result.sizeString = formatBytes(total)
             return result
         }
-        if item.rule.isDynamicLeftoversRule || item.rule.isDynamicContainerLeftoversRule,
+        if item.rule.isDynamicLeftoversRule
+            || item.rule.isDynamicContainerLeftoversRule
+            || item.rule.isDynamicExtensionLeftoversRule,
            var children = item.children, !children.isEmpty {
             children.sort { $0.sizeBytes > $1.sizeBytes }
             var result = item
@@ -1409,6 +1420,12 @@ nonisolated struct FileSystemScanner: Sendable {
         if path.contains("/Library/Containers/") {
             return "App Container"
         }
+        if path.contains("/Library/Application Scripts/") {
+            return "Application Script"
+        }
+        if path.contains("/Library/SystemExtensions/") {
+            return "System Extension"
+        }
         if path.contains("/Library/Preferences/") {
             return "Preferences"
         }
@@ -1436,6 +1453,8 @@ nonisolated struct FileSystemScanner: Sendable {
 
     private func associationIcon(_ path: String) -> String {
         if path.contains("/Containers/") { return "shippingbox.fill" }
+        if path.contains("/Application Scripts/") { return "scroll.fill" }
+        if path.contains("/SystemExtensions/") { return "puzzlepiece.extension.fill" }
         if path.contains("/Preferences/") { return "gearshape.fill" }
         if path.contains("/Caches/") { return "archivebox.fill" }
         if path.contains("/Logs/") { return "doc.text.fill" }
@@ -2858,6 +2877,573 @@ nonisolated struct FileSystemScanner: Sendable {
         return ([parentItem], false)
     }
 
+    // Safe Cleanup leftovers that are not Application Support folders or sandbox
+    // containers: App Extension scripts, Internet Plug-Ins, Services, login-item
+    // LaunchAgents whose Program is gone, and System Extensions whose host app
+    // is gone. Safari's own ~/Library/Safari data is intentionally not scanned.
+    private func scanExtensionLeftovers(
+        deferSizes: Bool = false
+    ) -> (items: [CategoryItem], accessDenied: Bool) {
+        let fileManager = FileManager.default
+        let installedApps = fetchInstalledAppIdentifiers()
+        var childItems: [CategoryItem] = []
+        var seenPaths = Set<String>()
+        var accessDenied = false
+
+        func appendChild(
+            name: String,
+            fullPath: String,
+            iconName: String,
+            note: LocalizedStringKey,
+            isDirectory: Bool
+        ) {
+            let standardized = URL(fileURLWithPath: fullPath).standardizedFileURL.path
+            guard seenPaths.insert(standardized).inserted else { return }
+            let sizeBytes = deferSizes
+                ? Int64(0)
+                : calculateDirectorySize(at: standardized, isDirectory: isDirectory)
+            let childRule = CleanRule(
+                name: name,
+                pathDescription: displayPath(for: standardized),
+                iconName: iconName,
+                iconColor: .pink,
+                cleanType: .deleteDirectoryTree,
+                note: note
+            )
+            childItems.append(
+                CategoryItem(
+                    name: childRule.name,
+                    pathDescription: childRule.pathDescription,
+                    iconName: childRule.iconName,
+                    iconColor: childRule.iconColor,
+                    sizeBytes: sizeBytes,
+                    sizeString: sizeBytes > 0 ? formatBytes(sizeBytes) : "",
+                    rule: childRule,
+                    pendingSizePaths: deferSizes ? [standardized] : nil
+                )
+            )
+        }
+
+        func entries(at path: String) -> [String] {
+            do {
+                return try fileManager.contentsOfDirectory(atPath: path)
+            } catch {
+                accessDenied = accessDenied || isPermissionDenied(error)
+                return []
+            }
+        }
+
+        let applicationScripts = NSString(string: "~/Library/Application Scripts")
+            .expandingTildeInPath
+        let containersRoot = NSString(string: "~/Library/Containers").expandingTildeInPath
+        let containerEntries: Set<String>?
+        do {
+            containerEntries = Set(try fileManager.contentsOfDirectory(atPath: containersRoot))
+        } catch {
+            accessDenied = accessDenied || isPermissionDenied(error)
+            containerEntries = isPermissionDenied(error) ? nil : []
+        }
+
+        for entry in entries(at: applicationScripts) where !entry.hasPrefix(".") {
+            if entry == "--TeamIdentifierPrefix-" { continue }
+            let fullPath = (applicationScripts as NSString).appendingPathComponent(entry)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) else {
+                continue
+            }
+
+            let owner: String?
+            if looksLikeUUID(entry) {
+                // UUID folders are often system containers. Only list them when
+                // the owning bundle id is known and is not Apple/system software.
+                guard let containerEntries else { continue }
+                guard containerEntries.contains(entry) else { continue }
+                switch owningBundleID(forContainerUUID: entry) {
+                case .accessDenied:
+                    accessDenied = true
+                    continue
+                case .unresolved, .missingContainer:
+                    continue
+                case .identifier(let bundleID):
+                    owner = bundleID
+                }
+            } else {
+                owner = entry
+            }
+
+            guard let owner,
+                  !leftoverBelongsToInstalledSoftware(owner, installedApps: installedApps),
+                  !isAppleSignedItem(at: fullPath) else {
+                continue
+            }
+
+            appendChild(
+                name: entry,
+                fullPath: fullPath,
+                iconName: "scroll.fill",
+                note: "Application Script",
+                isDirectory: isDirectory.boolValue
+            )
+        }
+
+        let pluginRoots = [
+            NSString(string: "~/Library/Internet Plug-Ins").expandingTildeInPath,
+            "/Library/Internet Plug-Ins"
+        ]
+        for root in pluginRoots {
+            for entry in entries(at: root) where !entry.hasPrefix(".") {
+                let fullPath = (root as NSString).appendingPathComponent(entry)
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) else {
+                    continue
+                }
+                let identifier = bundleIdentifier(at: fullPath)
+                    ?? (entry as NSString).deletingPathExtension
+                if leftoverBelongsToInstalledSoftware(identifier, installedApps: installedApps)
+                    || isAppleSignedItem(at: fullPath) {
+                    continue
+                }
+                appendChild(
+                    name: entry,
+                    fullPath: fullPath,
+                    iconName: "puzzlepiece.extension.fill",
+                    note: "Internet Plug-In",
+                    isDirectory: isDirectory.boolValue
+                )
+            }
+        }
+
+        let serviceRoots = [
+            NSString(string: "~/Library/Services").expandingTildeInPath,
+            "/Library/Services"
+        ]
+        for root in serviceRoots {
+            for entry in entries(at: root) where !entry.hasPrefix(".") {
+                let fullPath = (root as NSString).appendingPathComponent(entry)
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) else {
+                    continue
+                }
+                // User-created Automator workflows often have no bundle id; leave them alone.
+                guard let identifier = bundleIdentifier(at: fullPath), !identifier.isEmpty else {
+                    continue
+                }
+                if leftoverBelongsToInstalledSoftware(identifier, installedApps: installedApps)
+                    || isAppleSignedItem(at: fullPath) {
+                    continue
+                }
+                appendChild(
+                    name: (entry as NSString).deletingPathExtension,
+                    fullPath: fullPath,
+                    iconName: "gearshape.2.fill",
+                    note: "Service",
+                    isDirectory: isDirectory.boolValue
+                )
+            }
+        }
+
+        let launchAgentRoots = [
+            NSString(string: "~/Library/LaunchAgents").expandingTildeInPath,
+            "/Library/LaunchAgents"
+        ]
+        for root in launchAgentRoots {
+            for entry in entries(at: root) where !entry.hasPrefix(".") && entry.lowercased().hasSuffix(".plist") {
+                let fullPath = (root as NSString).appendingPathComponent(entry)
+                guard let leftover = launchAgentLeftover(at: fullPath) else { continue }
+                appendChild(
+                    name: leftover.label,
+                    fullPath: fullPath,
+                    iconName: "bolt.fill",
+                    note: "Login Item",
+                    isDirectory: false
+                )
+            }
+        }
+
+        let systemExtensionsRoot = "/Library/SystemExtensions"
+        switch systemExtensionLeftovers() {
+        case .accessDenied:
+            accessDenied = true
+        case .extensions(let leftovers):
+            for leftover in leftovers {
+                let fullPath = (systemExtensionsRoot as NSString)
+                    .appendingPathComponent(leftover.uniqueID)
+                var isDirectory: ObjCBool = false
+                guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDirectory) else {
+                    continue
+                }
+                if leftoverBelongsToInstalledSoftware(
+                    leftover.identifier,
+                    installedApps: installedApps
+                ) || isAppleSignedItem(at: fullPath) {
+                    continue
+                }
+                appendChild(
+                    name: leftover.identifier,
+                    fullPath: fullPath,
+                    iconName: "puzzlepiece.extension.fill",
+                    note: "System Extension",
+                    isDirectory: isDirectory.boolValue
+                )
+            }
+        }
+
+        guard !childItems.isEmpty else { return ([], accessDenied) }
+
+        let grouped = Dictionary(grouping: childItems) { item in
+            (item.pathDescription as NSString).deletingLastPathComponent
+        }
+        var parents: [CategoryItem] = []
+        for (groupPath, items) in grouped {
+            var groupedItems = items
+            if !deferSizes {
+                groupedItems.sort { $0.sizeBytes > $1.sizeBytes }
+            }
+            let total = groupedItems.reduce(Int64(0)) { $0 + $1.sizeBytes }
+            let parentRule = CleanRule(
+                name: groupPath,
+                pathDescription: groupPath,
+                iconName: groupedItems.first?.iconName ?? "puzzlepiece.extension.fill",
+                iconColor: .pink,
+                cleanType: .none,
+                note: groupedItems.first?.rule.note,
+                isDynamicExtensionLeftoversRule: true,
+                isCheckboxHidden: true
+            )
+            parents.append(
+                CategoryItem(
+                    name: parentRule.name,
+                    pathDescription: parentRule.pathDescription,
+                    iconName: parentRule.iconName,
+                    iconColor: parentRule.iconColor,
+                    sizeBytes: total,
+                    sizeString: total > 0 ? formatBytes(total) : "",
+                    rule: parentRule,
+                    children: groupedItems
+                )
+            )
+        }
+        parents.sort {
+            $0.pathDescription.localizedCaseInsensitiveCompare($1.pathDescription) == .orderedAscending
+        }
+        return (parents, accessDenied)
+    }
+
+    private func displayPath(for fullPath: String) -> String {
+        let home = NSHomeDirectory()
+        if fullPath == home {
+            return "~"
+        }
+        if fullPath.hasPrefix(home + "/") {
+            return "~" + fullPath.dropFirst(home.count)
+        }
+        return fullPath
+    }
+
+    private func looksLikeUUID(_ value: String) -> Bool {
+        let parts = value.split(separator: "-", omittingEmptySubsequences: false)
+        let lengths = [8, 4, 4, 4, 12]
+        guard parts.count == 5,
+              zip(parts, lengths).allSatisfy({ $0.count == $1 }) else {
+            return false
+        }
+        let hex = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
+        return value.unicodeScalars.allSatisfy { $0 == "-" || hex.contains($0) }
+    }
+
+    private enum ContainerOwnerResult {
+        case identifier(String)
+        case missingContainer
+        case unresolved
+        case accessDenied
+    }
+
+    private func owningBundleID(forContainerUUID uuid: String) -> ContainerOwnerResult {
+        let containerPath = NSString(string: "~/Library/Containers/\(uuid)")
+            .expandingTildeInPath
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: containerPath, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return .missingContainer
+        }
+
+        let metadataPlist = (containerPath as NSString)
+            .appendingPathComponent(".com.apple.containermanagerd.metadata.plist")
+        do {
+            let data = try Data(contentsOf: URL(fileURLWithPath: metadataPlist))
+            if let plist = try PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+            ) as? [String: Any],
+               let identifier = plist["MCMMetadataIdentifier"] as? String,
+               !identifier.isEmpty {
+                return .identifier(identifier)
+            }
+            return .unresolved
+        } catch {
+            return isPermissionDenied(error) ? .accessDenied : .unresolved
+        }
+    }
+
+    private func leftoverBelongsToInstalledSoftware(
+        _ identifier: String,
+        installedApps: Set<String>
+    ) -> Bool {
+        for candidate in leftoverMatchCandidates(identifier) {
+            if isAppleOwnedIdentifier(candidate) {
+                return true
+            }
+            let lower = candidate.lowercased()
+            if lower.hasPrefix("dev.arayofsunshine.littleclean") {
+                return true
+            }
+            if folderMatchesInstalledApp(
+                candidate,
+                lowerFolder: lower,
+                normalizedFolder: normalizeString(candidate),
+                installedApps: installedApps
+            ) {
+                return true
+            }
+            if InstalledToolIndex.shared.isInstalledTool(candidate) {
+                return true
+            }
+            if SystemComponentIndex.shared.isSystemOwned(candidate) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func leftoverMatchCandidates(_ identifier: String) -> [String] {
+        var candidates = [identifier]
+        let parts = identifier.split(separator: ".", omittingEmptySubsequences: false)
+            .map(String.init)
+        if let first = parts.first,
+           first.count == 10,
+           first.allSatisfy({ $0.isLetter || $0.isNumber }),
+           parts.count >= 2 {
+            let stripped = parts.dropFirst().joined(separator: ".")
+            candidates.append(stripped)
+            let lower = stripped.lowercased()
+            if lower.hasPrefix("group.") {
+                candidates.append(String(stripped.dropFirst(6)))
+            } else if lower.hasPrefix("groups.") {
+                candidates.append(String(stripped.dropFirst(7)))
+            }
+        } else {
+            let lower = identifier.lowercased()
+            if lower.hasPrefix("group.") {
+                candidates.append(String(identifier.dropFirst(6)))
+            } else if lower.hasPrefix("groups.") {
+                candidates.append(String(identifier.dropFirst(7)))
+            }
+        }
+        return candidates
+    }
+
+    private func isSystemOwnedExtensionIdentifier(_ identifier: String) -> Bool {
+        leftoverMatchCandidates(identifier).contains { isAppleOwnedIdentifier($0) }
+    }
+
+    private func isAppleOwnedIdentifier(_ identifier: String) -> Bool {
+        let lower = identifier.lowercased()
+        if lower == "com.apple"
+            || lower.hasPrefix("com.apple.")
+            || lower.hasPrefix("apple.")
+            || lower.hasPrefix("groups.com.apple.")
+            || lower.hasPrefix("group.com.apple.")
+            || lower.contains(".com.apple.")
+            || lower.hasSuffix(".com.apple") {
+            return true
+        }
+        let parts = lower.split(separator: ".", maxSplits: 1)
+        guard parts.count == 2, parts[0].count == 10 else { return false }
+        let rest = String(parts[1])
+        return rest == "com.apple"
+            || rest.hasPrefix("com.apple.")
+            || rest.hasPrefix("apple.")
+            || rest.hasPrefix("groups.com.apple.")
+            || rest.hasPrefix("group.com.apple.")
+    }
+
+    private func isAppleSignedItem(at path: String) -> Bool {
+        let url = URL(fileURLWithPath: path)
+        var staticCode: SecStaticCode?
+        guard SecStaticCodeCreateWithPath(
+            url as CFURL,
+            SecCSFlags(rawValue: 0),
+            &staticCode
+        ) == errSecSuccess,
+              let staticCode else {
+            return false
+        }
+
+        var appleAnchor: SecRequirement?
+        guard SecRequirementCreateWithString(
+            "anchor apple" as CFString,
+            SecCSFlags(rawValue: 0),
+            &appleAnchor
+        ) == errSecSuccess,
+              let appleAnchor else {
+            return false
+        }
+        return SecStaticCodeCheckValidity(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSCheckAllArchitectures),
+            appleAnchor
+        ) == errSecSuccess
+    }
+
+    private func isSystemManagedPath(_ path: String) -> Bool {
+        path.hasPrefix("/System/")
+            || path.hasPrefix("/System/Cryptexes/")
+            || path.hasPrefix("/Library/Apple/")
+            || path.hasPrefix("/usr/libexec/")
+            || path.hasPrefix("/usr/sbin/")
+            || path.hasPrefix("/usr/bin/")
+            || path.hasPrefix("/bin/")
+            || path.hasPrefix("/sbin/")
+            || path.hasPrefix("/private/var/db/")
+    }
+
+    private func bundleIdentifier(at path: String) -> String? {
+        if let identifier = Bundle(path: path)?.bundleIdentifier, !identifier.isEmpty {
+            return identifier
+        }
+        let plistPath = (path as NSString).appendingPathComponent("Contents/Info.plist")
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: plistPath)),
+              let plist = try? PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+              ) as? [String: Any],
+              let identifier = plist["CFBundleIdentifier"] as? String,
+              !identifier.isEmpty else {
+            return nil
+        }
+        return identifier
+    }
+
+    private func launchAgentLeftover(at plistPath: String) -> (label: String, program: String)? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: plistPath)),
+              let plist = try? PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+              ) as? [String: Any] else {
+            return nil
+        }
+
+        let filename = (plistPath as NSString).deletingPathExtension
+        let label = (plist["Label"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? filename
+        if leftoverBelongsToInstalledSoftware(
+            label,
+            installedApps: fetchInstalledAppIdentifiers()
+        ) {
+            return nil
+        }
+        guard let program = launchAgentTargetPath(in: plist) else {
+            return nil
+        }
+        if isSystemManagedPath(program) || isAppleSignedItem(at: program) {
+            return nil
+        }
+        if FileManager.default.fileExists(atPath: program) {
+            return nil
+        }
+        return (label, program)
+    }
+
+    private func launchAgentTargetPath(in plist: [String: Any]) -> String? {
+        if let program = plist["Program"] as? String, !program.isEmpty {
+            return NSString(string: program).expandingTildeInPath
+        }
+        guard let arguments = plist["ProgramArguments"] as? [String],
+              let first = arguments.first, !first.isEmpty else {
+            return nil
+        }
+        let expandedFirst = NSString(string: first).expandingTildeInPath
+        if Self.launchWrapperExecutables.contains(expandedFirst) {
+            for argument in arguments.dropFirst() where !argument.hasPrefix("-") {
+                if argument.hasPrefix("/") || argument.hasPrefix("~") {
+                    return NSString(string: argument).expandingTildeInPath
+                }
+            }
+        }
+        return expandedFirst
+    }
+
+    private static let launchWrapperExecutables: Set<String> = [
+        "/bin/sh", "/bin/bash", "/bin/zsh", "/bin/csh", "/bin/tcsh",
+        "/usr/bin/env", "/usr/bin/open"
+    ]
+
+    private enum SystemExtensionScanResult {
+        case extensions([(uniqueID: String, identifier: String)])
+        case accessDenied
+    }
+
+    private func systemExtensionLeftovers() -> SystemExtensionScanResult {
+        let dbPath = "/Library/SystemExtensions/db.plist"
+        let data: Data
+        do {
+            data = try Data(contentsOf: URL(fileURLWithPath: dbPath))
+        } catch {
+            return isPermissionDenied(error) ? .accessDenied : .extensions([])
+        }
+        guard let plist = try? PropertyListSerialization.propertyList(
+            from: data,
+            options: [],
+            format: nil
+        ) as? [String: Any],
+              let extensions = plist["extensions"] as? [[String: Any]] else {
+            return .extensions([])
+        }
+
+        var leftovers: [(uniqueID: String, identifier: String)] = []
+        for record in extensions {
+            guard let uniqueID = record["uniqueID"] as? String, !uniqueID.isEmpty else {
+                continue
+            }
+            let identifier = (record["identifier"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? uniqueID
+            if looksLikeUUID(identifier)
+                || isSystemOwnedExtensionIdentifier(identifier) {
+                continue
+            }
+            if let originPath = record["originPath"] as? String, !originPath.isEmpty {
+                if isSystemManagedPath(originPath)
+                    || hostApplicationExists(atOriginPath: originPath)
+                    || isAppleSignedItem(at: originPath) {
+                    continue
+                }
+                leftovers.append((uniqueID, identifier))
+                continue
+            }
+            if leftoverBelongsToInstalledSoftware(
+                identifier,
+                installedApps: fetchInstalledAppIdentifiers()
+            ) {
+                continue
+            }
+            leftovers.append((uniqueID, identifier))
+        }
+        return .extensions(leftovers)
+    }
+
+    private func hostApplicationExists(atOriginPath originPath: String) -> Bool {
+        var url = URL(fileURLWithPath: originPath)
+        while url.path != "/" {
+            if url.pathExtension.lowercased() == "app" {
+                return FileManager.default.fileExists(atPath: url.path)
+            }
+            url.deleteLastPathComponent()
+        }
+        return false
+    }
+
     // Read-only analysis of containers owned by apps that are still installed.
     // Access to another app's sandbox can require Full Disk Access even though
     // this scan never modifies the container.
@@ -3028,6 +3614,7 @@ nonisolated struct FileSystemScanner: Sendable {
 
         // Curated, safe-to-clear tool caches (contents only; folder is kept)
         let knownCaches: [(name: String, subpath: String, icon: String, color: Color)] = [
+            ("App Caches", "Library/Caches", "archivebox.fill", .orange),
             ("XDG Cache", ".cache", "shippingbox.fill", .orange),
             ("Gradle Cache", ".gradle/caches", "hammer.fill", .purple),
             ("Gradle Wrapper Distributions", ".gradle/wrapper/dists", "hammer.fill", .purple),
@@ -3084,6 +3671,130 @@ nonisolated struct FileSystemScanner: Sendable {
         }
 
         return childItems
+    }
+
+    // Regenerable Chrome caches under Application Support. HTTP cache lives in
+    // ~/Library/Caches/Google/Chrome and is already covered by App Caches.
+    private func scanChromeCaches(deferSizes: Bool = false) -> [CategoryItem] {
+        let chromeRoot = NSString(string: "~/Library/Application Support/Google/Chrome")
+            .expandingTildeInPath
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: chromeRoot, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              let entries = try? fileManager.contentsOfDirectory(atPath: chromeRoot) else {
+            return []
+        }
+
+        let profileNames = entries.filter { entry in
+            entry == "Default"
+                || entry == "Guest Profile"
+                || entry == "System Profile"
+                || entry.hasPrefix("Profile ")
+        }.sorted()
+
+        let profileCaches: [(relative: String, name: String, note: LocalizedStringKey)] = [
+            ("Cache", "HTTP Cache", "HTTP Cache"),
+            ("Code Cache", "Code Cache", "Code Cache"),
+            ("GPUCache", "GPU Cache", "GPU Cache"),
+            ("Service Worker/CacheStorage", "Service Worker Cache", "Service Worker Cache"),
+            ("Service Worker/ScriptCache", "Service Worker Script Cache", "Service Worker Script Cache")
+        ]
+        let browserCaches: [(relative: String, name: String, note: LocalizedStringKey)] = [
+            ("ShaderCache", "Shader Cache", "Shader Cache"),
+            ("GrShaderCache", "Skia Shader Cache", "Skia Shader Cache"),
+            ("GraphiteDawnCache", "Graphite Cache", "Graphite Cache"),
+            ("GPUPersistentCache", "GPU Persistent Cache", "GPU Persistent Cache")
+        ]
+
+        var childItems: [CategoryItem] = []
+
+        func appendCache(relativePath: String, name: String, note: LocalizedStringKey) {
+            let fullPath = (chromeRoot as NSString).appendingPathComponent(relativePath)
+            var isDir: ObjCBool = false
+            guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir),
+                  isDir.boolValue else { return }
+
+            let bytes: Int64
+            if deferSizes {
+                bytes = 0
+            } else {
+                bytes = calculateDirectorySize(at: fullPath, isDirectory: true)
+                guard bytes > 1_000_000 else { return }
+            }
+
+            let displayPath = "~/Library/Application Support/Google/Chrome/\(relativePath)"
+            let rule = CleanRule(
+                name: name,
+                pathDescription: displayPath,
+                iconName: "globe",
+                iconColor: .orange,
+                cleanType: .deleteDirectory,
+                note: note
+            )
+            childItems.append(
+                CategoryItem(
+                    name: name,
+                    pathDescription: displayPath,
+                    iconName: "globe",
+                    iconColor: .orange,
+                    sizeBytes: bytes,
+                    sizeString: bytes > 0 ? formatBytes(bytes) : "",
+                    rule: rule,
+                    pendingSizePaths: deferSizes ? [fullPath] : nil
+                )
+            )
+        }
+
+        for profile in profileNames {
+            for cache in profileCaches {
+                let label = profileNames.count > 1
+                    ? "\(cache.name) (\(profile))"
+                    : cache.name
+                appendCache(
+                    relativePath: "\(profile)/\(cache.relative)",
+                    name: label,
+                    note: cache.note
+                )
+            }
+        }
+        for cache in browserCaches {
+            appendCache(
+                relativePath: cache.relative,
+                name: cache.name,
+                note: cache.note
+            )
+        }
+
+        guard !childItems.isEmpty else { return [] }
+
+        if !deferSizes {
+            childItems.sort { $0.sizeBytes > $1.sizeBytes }
+        }
+
+        let parentRule = CleanRule(
+            name: String(localized: "Chrome Cache"),
+            pathDescription: "~/Library/Application Support/Google/Chrome",
+            iconName: "globe",
+            iconColor: .orange,
+            cleanType: .none,
+            note: "Chrome Cache",
+            isDynamicChromeCacheRule: true,
+            isCheckboxHidden: true
+        )
+        var parent = CategoryItem(
+            name: parentRule.name,
+            pathDescription: parentRule.pathDescription,
+            iconName: parentRule.iconName,
+            iconColor: parentRule.iconColor,
+            sizeBytes: childItems.reduce(Int64(0)) { $0 + $1.sizeBytes },
+            sizeString: "",
+            rule: parentRule,
+            children: childItems
+        )
+        parent.sizeString = parent.sizeBytes > 0 ? formatBytes(parent.sizeBytes) : ""
+        parent.displayPath = String(localized: "Chrome Cache")
+        return [parent]
     }
 
     // MARK: - Installed Tools (read-only informational section)

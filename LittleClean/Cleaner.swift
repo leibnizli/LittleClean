@@ -26,13 +26,18 @@ nonisolated struct Cleaner: Sendable {
         let privileged = PrivilegedFileSession()
         defer { privileged.invalidate() }
         var failures: [CleanFailure] = []
-        for item in items {
+        var itemsToClean = items
+        if let chromeFailure = quitChromeIfNeeded(for: itemsToClean) {
+            failures.append(chromeFailure)
+            itemsToClean = itemsToClean.filter { !isChromeSupportCachePath($0.pathDescription) }
+        }
+        for item in itemsToClean {
             failures.append(contentsOf: cleanItem(item, privileged: privileged))
         }
         return CleanResult(
             categories: rebuildRemeasuringCleanedLeaves(
                 in: snapshot,
-                cleanedIDs: Set(items.map { $0.id })
+                cleanedIDs: Set(itemsToClean.map { $0.id })
             ),
             failures: failures
         )
@@ -197,6 +202,38 @@ nonisolated struct Cleaner: Sendable {
             }
         }
         return nil
+    }
+
+    private func isChromeSupportCachePath(_ pathDescription: String) -> Bool {
+        let expanded = NSString(string: pathDescription).expandingTildeInPath
+        let root = NSString(string: "~/Library/Application Support/Google/Chrome")
+            .expandingTildeInPath
+        return expanded == root || expanded.hasPrefix(root + "/")
+    }
+
+    private func quitChromeIfNeeded(for items: [CategoryItem]) -> CleanFailure? {
+        guard items.contains(where: { isChromeSupportCachePath($0.pathDescription) }) else {
+            return nil
+        }
+        guard let chromeURL = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: "com.google.Chrome"
+        ) else {
+            return nil
+        }
+        if runningApplications(for: chromeURL).isEmpty {
+            return nil
+        }
+        if quitRunningApplications(for: chromeURL) {
+            return nil
+        }
+        return CleanFailure(
+            path: chromeURL.path,
+            domain: "LittleClean",
+            code: 2,
+            reason: String(
+                localized: "Could not quit the application. Quit it completely, then try again."
+            )
+        )
     }
 
     private func quitRunningApplications(for appURL: URL) -> Bool {
