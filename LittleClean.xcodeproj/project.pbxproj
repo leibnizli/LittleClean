@@ -8,11 +8,40 @@
 
 /* Begin PBXBuildFile section */
 		84D15171301A0B1200CB98EE /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 84D15170301A0B1200CB98EE /* Localizable.xcstrings */; };
+		84F15180101A0B1200CB980D /* LittleCleanHelper/dev.arayofsunshine.LittleClean.helper.plist in Embed Helper Daemon */ = {isa = PBXBuildFile; fileRef = 84F15180101A0B1200CB980C /* LittleCleanHelper/dev.arayofsunshine.LittleClean.helper.plist */; };
+		84F15180101A0B1200CB980E /* LittleCleanHelper in Embed Helper Daemon */ = {isa = PBXBuildFile; fileRef = 84F15180101A0B1200CB9801 /* LittleCleanHelper */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		84F15180101A0B1200CB980B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 84AB242A30178C1F00782FA0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 84F15180101A0B1200CB9802;
+			remoteInfo = LittleCleanHelper;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		84F15180101A0B1200CB9809 /* Embed Helper Daemon */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Library/LaunchDaemons;
+			dstSubfolderSpec = 1;
+			files = (
+				84F15180101A0B1200CB980E /* LittleCleanHelper in Embed Helper Daemon */,
+				84F15180101A0B1200CB980D /* LittleCleanHelper/dev.arayofsunshine.LittleClean.helper.plist in Embed Helper Daemon */,
+			);
+			name = "Embed Helper Daemon";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		84AB243230178C1F00782FA0 /* LittleClean.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LittleClean.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		84D15170301A0B1200CB98EE /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		84F15180101A0B1200CB9801 /* LittleCleanHelper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = LittleCleanHelper; sourceTree = BUILT_PRODUCTS_DIR; };
+		84F15180101A0B1200CB980C /* LittleCleanHelper/dev.arayofsunshine.LittleClean.helper.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = LittleCleanHelper/dev.arayofsunshine.LittleClean.helper.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -34,10 +63,22 @@
 			path = LittleClean;
 			sourceTree = "<group>";
 		};
+		84F15180101A0B1200CB9803 /* LittleCleanHelper */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LittleCleanHelper;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		84AB242F30178C1F00782FA0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		84F15180101A0B1200CB9805 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -52,6 +93,8 @@
 			children = (
 				84D15170301A0B1200CB98EE /* Localizable.xcstrings */,
 				84AB243430178C1F00782FA0 /* LittleClean */,
+				84F15180101A0B1200CB9803 /* LittleCleanHelper */,
+				84F15180101A0B1200CB980C /* LittleCleanHelper/dev.arayofsunshine.LittleClean.helper.plist */,
 				84AB243330178C1F00782FA0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -60,6 +103,7 @@
 			isa = PBXGroup;
 			children = (
 				84AB243230178C1F00782FA0 /* LittleClean.app */,
+				84F15180101A0B1200CB9801 /* LittleCleanHelper */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -73,11 +117,13 @@
 			buildPhases = (
 				84AB242E30178C1F00782FA0 /* Sources */,
 				84AB242F30178C1F00782FA0 /* Frameworks */,
+				84F15180101A0B1200CB9809 /* Embed Helper Daemon */,
 				84AB243030178C1F00782FA0 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				84F15180101A0B1200CB980A /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				84AB243430178C1F00782FA0 /* LittleClean */,
@@ -88,6 +134,27 @@
 			productName = LittleClean;
 			productReference = 84AB243230178C1F00782FA0 /* LittleClean.app */;
 			productType = "com.apple.product-type.application";
+		};
+		84F15180101A0B1200CB9802 /* LittleCleanHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 84F15180101A0B1200CB9808 /* Build configuration list for PBXNativeTarget "LittleCleanHelper" */;
+			buildPhases = (
+				84F15180101A0B1200CB9804 /* Sources */,
+				84F15180101A0B1200CB9805 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				84F15180101A0B1200CB9803 /* LittleCleanHelper */,
+			);
+			name = LittleCleanHelper;
+			packageProductDependencies = (
+			);
+			productName = LittleCleanHelper;
+			productReference = 84F15180101A0B1200CB9801 /* LittleCleanHelper */;
+			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
 
@@ -100,6 +167,9 @@
 				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					84AB243130178C1F00782FA0 = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					84F15180101A0B1200CB9802 = {
 						CreatedOnToolsVersion = 26.5;
 					};
 				};
@@ -120,6 +190,7 @@
 			projectRoot = "";
 			targets = (
 				84AB243130178C1F00782FA0 /* LittleClean */,
+				84F15180101A0B1200CB9802 /* LittleCleanHelper */,
 			);
 		};
 /* End PBXProject section */
@@ -143,7 +214,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		84F15180101A0B1200CB9804 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		84F15180101A0B1200CB980A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 84F15180101A0B1200CB9802 /* LittleCleanHelper */;
+			targetProxy = 84F15180101A0B1200CB980B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		84AB243B30178C2000782FA0 /* Debug */ = {
@@ -275,7 +361,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				DEVELOPMENT_TEAM = XTWM4R2294;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -289,7 +375,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.arayofsunshine.LittleClean;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -309,7 +395,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				DEVELOPMENT_TEAM = XTWM4R2294;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -323,7 +409,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 1.7;
+				MARKETING_VERSION = 1.8;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.arayofsunshine.LittleClean;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -331,6 +417,46 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		84F15180101A0B1200CB9806 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = XTWM4R2294;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.arayofsunshine.LittleClean.helper;
+				PRODUCT_NAME = LittleCleanHelper;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		84F15180101A0B1200CB9807 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = XTWM4R2294;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.arayofsunshine.LittleClean.helper;
+				PRODUCT_NAME = LittleCleanHelper;
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -353,6 +479,15 @@
 			buildConfigurations = (
 				84AB243E30178C2000782FA0 /* Debug */,
 				84AB243F30178C2000782FA0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		84F15180101A0B1200CB9808 /* Build configuration list for PBXNativeTarget "LittleCleanHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				84F15180101A0B1200CB9806 /* Debug */,
+				84F15180101A0B1200CB9807 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

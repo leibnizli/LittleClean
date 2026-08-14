@@ -70,6 +70,26 @@
     "About Deep Analysis" : {
 
     },
+    "Authenticate to modify protected files." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请验证身份以修改受保护的文件。"
+          }
+        }
+      }
+    },
+    "Allow LittleClean in System Settings → General → Login Items & Extensions." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在系统设置 → 通用 → 登录项与扩展 中允许 LittleClean。"
+          }
+        }
+      }
+    },
     "Analyzing apps…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -386,6 +406,16 @@
         }
       }
     },
+    "LittleClean needs administrator access to modify protected files." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LittleClean 需要管理员权限才能修改受保护的文件。"
+          }
+        }
+      }
+    },
     "LittleClean refuses to remove itself or a protected system application." : {
       "localizations" : {
         "zh-Hans" : {
@@ -551,6 +581,16 @@
         }
       }
     },
+    "Open Login Items Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开登录项设置"
+          }
+        }
+      }
+    },
     "Path" : {
       "localizations" : {
         "zh-Hans" : {
@@ -611,6 +651,16 @@
         }
       }
     },
+    "Protected files will ask for an administrator password." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "处理受保护文件时将要求输入管理员密码。"
+          }
+        }
+      }
+    },
     "Read Only" : {
 
     },
@@ -650,6 +700,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除已安装应用及与其匹配的用户数据。"
+          }
+        }
+      }
+    },
+    "Registers a background helper so LittleClean can use Touch ID instead of an administrator password. macOS may ask you to allow LittleClean in Login Items & Extensions." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会注册一个后台助手，以便用 Touch ID 代替管理员密码。macOS 可能会要求你在「登录项与扩展」中允许 LittleClean。"
           }
         }
       }
@@ -946,6 +1006,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "uv 工具"
+          }
+        }
+      }
+    },
+    "Touch ID is available for protected files." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "处理受保护文件时可以使用 Touch ID。"
+          }
+        }
+      }
+    },
+    "Use Password" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用密码"
+          }
+        }
+      }
+    },
+    "Use Touch ID for protected files" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用 Touch ID 处理受保护文件"
           }
         }
       }

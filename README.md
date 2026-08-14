@@ -51,8 +51,20 @@ Read-only mode for complete visibility into development environments and disk us
 - **Reveal in Finder:** Open the exact directory or application bundle in Finder with a single click.
 - **Visual Storage Indicator:** A disk usage pie chart showing used vs. free space at a glance.
 - **Full Disk Access:** Detects missing Full Disk Access and can open System Settings when needed for deeper scans and cleanup.
+- **Touch ID:** Optional. Enable it in LittleClean → Settings to use Touch ID instead of an administrator password for protected files.
 - **Update Check:** Notices when a newer release is available on GitHub.
 - **Bilingual UI:** English and Simplified Chinese.
+
+### Use Touch ID instead of a password
+macOS only shows a password field in the system administrator dialog for third-party apps. LittleClean can use a background helper so you authenticate with **Touch ID**, with password as a fallback. The helper is off by default and is registered only if you turn it on.
+
+1. Open **LittleClean → Settings** (⌘,).
+2. Enable **Use Touch ID for protected files**.
+3. If macOS asks you to allow a background item, open **System Settings → General → Login Items & Extensions** and allow LittleClean.
+4. Uninstall an app in `/Applications`, or clean a file you don’t have permission to remove. Use **Touch ID**, or choose **Use Password**.
+5. If the setting is off, or the helper is not allowed yet, LittleClean still uses the administrator password dialog.
+
+Turn the setting off to unregister the helper. Macs without Touch ID, or with Touch ID turned off, go straight to the password option. Scanning and Deep Analysis never ask for authentication.
 
 ## License
 MIT

@@ -21,6 +21,10 @@ struct LittleCleanApp: App {
                 Link("Website", destination: URL(string: "https://arayofsunshine.dev/")!)
             }
         }
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 

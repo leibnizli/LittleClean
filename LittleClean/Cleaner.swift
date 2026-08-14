@@ -23,9 +23,11 @@ nonisolated struct Cleaner: Sendable {
 
     // Delete the supplied items and synchronously remeasure affected leaves and parent totals.
     func clean(_ items: [CategoryItem], in snapshot: [CategoryItem]) -> CleanResult {
+        let privileged = PrivilegedFileSession()
+        defer { privileged.invalidate() }
         var failures: [CleanFailure] = []
         for item in items {
-            failures.append(contentsOf: cleanItem(item))
+            failures.append(contentsOf: cleanItem(item, privileged: privileged))
         }
         return CleanResult(
             categories: rebuildRemeasuringCleanedLeaves(
@@ -36,7 +38,7 @@ nonisolated struct Cleaner: Sendable {
         )
     }
 
-    private func cleanItem(_ item: CategoryItem) -> [CleanFailure] {
+    private func cleanItem(_ item: CategoryItem, privileged: PrivilegedFileSession) -> [CleanFailure] {
         var failures: [CleanFailure] = []
 
         func recordFailure(_ error: Error, path: String) {
@@ -61,7 +63,7 @@ nonisolated struct Cleaner: Sendable {
                     do {
                         try fileManager.removeItem(atPath: fullPath)
                     } catch {
-                        if isPermissionError(error) && removePathWithAdminPrivileges(path: fullPath) {
+                        if isPermissionError(error) && privileged.remove(path: fullPath) {
                             continue
                         }
                         recordFailure(error, path: fullPath)
@@ -73,7 +75,7 @@ nonisolated struct Cleaner: Sendable {
             do {
                 try FileManager.default.removeItem(atPath: treePath)
             } catch {
-                if isPermissionError(error) && removePathWithAdminPrivileges(path: treePath) {
+                if isPermissionError(error) && privileged.remove(path: treePath) {
                     break
                 }
                 recordFailure(error, path: treePath)
@@ -93,7 +95,7 @@ nonisolated struct Cleaner: Sendable {
                 do {
                     try fileManager.removeItem(atPath: path)
                 } catch {
-                    if isPermissionError(error) && removePathWithAdminPrivileges(path: path) {
+                    if isPermissionError(error) && privileged.remove(path: path) {
                         continue
                     }
                     recordFailure(error, path: path)
@@ -122,7 +124,7 @@ nonisolated struct Cleaner: Sendable {
                         resultingItemURL: nil
                     )
                 } catch {
-                    if isPermissionError(error) && trashPathWithAdminPrivileges(path: path) {
+                    if isPermissionError(error) && privileged.moveToTrash(path: path) {
                         continue
                     }
                     recordFailure(error, path: path)
@@ -307,29 +309,6 @@ nonisolated struct Cleaner: Sendable {
         }
         if nsError.domain == NSPOSIXErrorDomain && (nsError.code == Int(EACCES) || nsError.code == Int(EPERM)) {
             return true
-        }
-        return false
-    }
-
-    private func removePathWithAdminPrivileges(path: String) -> Bool {
-        let script = "do shell script \"rm -rf \" & quoted form of \"\(path)\" with administrator privileges"
-        var errorDict: NSDictionary?
-        if let appleScript = NSAppleScript(source: script) {
-            appleScript.executeAndReturnError(&errorDict)
-            return errorDict == nil
-        }
-        return false
-    }
-
-    private func trashPathWithAdminPrivileges(path: String) -> Bool {
-        let trashPath = ("~/.Trash" as NSString).expandingTildeInPath
-        let script = """
-        do shell script "basename=$(basename " & quoted form of "\(path)" & "); dest=\\"\(trashPath)/$basename\\"; if [ -e \\"$dest\\" ]; then dest=\\"\(trashPath)/$(date +%s)-$basename\\"; fi; mv -f " & quoted form of "\(path)" & " \\"$dest\\"" with administrator privileges
-        """
-        var errorDict: NSDictionary?
-        if let appleScript = NSAppleScript(source: script) {
-            appleScript.executeAndReturnError(&errorDict)
-            return errorDict == nil
         }
         return false
     }
