@@ -1143,9 +1143,6 @@ nonisolated struct FileSystemScanner: Sendable {
             parent.displayPath = "~ (Caches)"
             return ([parent], false)
         }
-        if rule.isDynamicChromeCacheRule {
-            return (scanChromeCaches(deferSizes: deferSizes), false)
-        }
         guard fileManager.fileExists(atPath: expandedPath, isDirectory: &isDirectory) else {
             return ([], false)
         }
@@ -1178,19 +1175,28 @@ nonisolated struct FileSystemScanner: Sendable {
         return ([item], false)
     }
 
-    // Drop trivial entries after lazy sizing (home caches / unavailable simulators).
+    // Re-sort and re-total after lazy sizing (home caches / unavailable simulators / Chrome).
     func finalizeMeasuredCategory(_ item: CategoryItem) -> CategoryItem? {
-        let minBytes: Int64 = 1_000_000
         if item.rule.isDynamicHomeCleanupRule
             || item.rule.isDynamicUnavailableSimulatorRule
             || item.rule.isDynamicChromeCacheRule {
-            let children = (item.children ?? []).filter { $0.sizeBytes > minBytes }
+            let children = (item.children ?? []).compactMap { child -> CategoryItem? in
+                guard let nested = child.children, !nested.isEmpty else {
+                    return child
+                }
+                var group = child
+                group.children = nested.sorted { $0.sizeBytes > $1.sizeBytes }
+                let total = nested.reduce(Int64(0)) { $0 + $1.sizeBytes }
+                group.sizeBytes = total
+                group.sizeString = total > 0 ? formatBytes(total) : ""
+                return group
+            }
             guard !children.isEmpty else { return nil }
             var result = item
             result.children = children.sorted { $0.sizeBytes > $1.sizeBytes }
             let total = children.reduce(Int64(0)) { $0 + $1.sizeBytes }
             result.sizeBytes = total
-            result.sizeString = formatBytes(total)
+            result.sizeString = total > 0 ? formatBytes(total) : ""
             return result
         }
         if item.rule.isDynamicLeftoversRule
@@ -2037,7 +2043,6 @@ nonisolated struct FileSystemScanner: Sendable {
                     bytes = 0
                 } else {
                     bytes = calculateDirectorySize(at: devicePath, isDirectory: true)
-                    guard bytes > 1_000_000 else { continue } // skip trivial device folders
                 }
 
                 totalBytes += bytes
@@ -3616,10 +3621,7 @@ nonisolated struct FileSystemScanner: Sendable {
         let knownCaches: [(name: String, subpath: String, icon: String, color: Color)] = [
             ("App Caches", "Library/Caches", "archivebox.fill", .orange),
             ("XDG Cache", ".cache", "shippingbox.fill", .orange),
-            ("Gradle Cache", ".gradle/caches", "hammer.fill", .purple),
-            ("Gradle Wrapper Distributions", ".gradle/wrapper/dists", "hammer.fill", .purple),
-            ("npm Cache", ".npm/_cacache", "shippingbox.fill", .red),
-            ("npx Cache", ".npm/_npx", "shippingbox.fill", .red),
+            ("npm Cache", ".npm", "shippingbox.fill", .red),
             ("pnpm Store", ".pnpm-store", "shippingbox.fill", .teal),
             ("pnpm Store (macOS)", "Library/pnpm", "shippingbox.fill", .teal),
             ("Yarn Cache", ".yarn/cache", "shippingbox.fill", .blue),
@@ -3631,44 +3633,103 @@ nonisolated struct FileSystemScanner: Sendable {
             ("Cargo Registry Cache", ".cargo/registry", "shippingbox.fill", .orange),
             ("Cargo Git Cache", ".cargo/git", "shippingbox.fill", .orange)
         ]
+        let gradleCaches: [(name: String, subpath: String)] = [
+            ("Cache", ".gradle/caches"),
+            ("Wrapper Distributions", ".gradle/wrapper/dists"),
+            ("Temporary Files", ".gradle/.tmp"),
+            ("Daemon Logs", ".gradle/daemon"),
+            ("Native Libraries", ".gradle/native")
+        ]
 
-        var childItems: [CategoryItem] = []
-
-        for cache in knownCaches {
-            let fullPath = (home as NSString).appendingPathComponent(cache.subpath)
+        func makeCacheItem(
+            name: String,
+            subpath: String,
+            icon: String,
+            color: Color
+        ) -> CategoryItem? {
+            let fullPath = (home as NSString).appendingPathComponent(subpath)
             var isDir: ObjCBool = false
             guard fileManager.fileExists(atPath: fullPath, isDirectory: &isDir),
-                  isDir.boolValue else { continue }
+                  isDir.boolValue else { return nil }
 
             let bytes: Int64
             if deferSizes {
                 bytes = 0
             } else {
                 bytes = calculateDirectorySize(at: fullPath, isDirectory: true)
-                guard bytes > 1_000_000 else { continue } // skip trivial caches
             }
 
-            let displayPath = "~/\(cache.subpath)"
+            let displayPath = "~/\(subpath)"
             let rule = CleanRule(
-                name: cache.name,
+                name: name,
                 pathDescription: displayPath,
-                iconName: cache.icon,
-                iconColor: cache.color,
+                iconName: icon,
+                iconColor: color,
                 cleanType: .deleteDirectory,
-                note: LocalizedStringKey(cache.name)
+                note: LocalizedStringKey(name)
             )
-            let item = CategoryItem(
-                name: cache.name,
+            return CategoryItem(
+                name: name,
                 pathDescription: displayPath,
-                iconName: cache.icon,
-                iconColor: cache.color,
+                iconName: icon,
+                iconColor: color,
                 sizeBytes: bytes,
                 sizeString: bytes > 0 ? formatBytes(bytes) : "",
                 rule: rule,
                 pendingSizePaths: deferSizes ? [fullPath] : nil
             )
-            childItems.append(item)
         }
+
+        var childItems: [CategoryItem] = []
+
+        for cache in knownCaches {
+            if let item = makeCacheItem(
+                name: cache.name,
+                subpath: cache.subpath,
+                icon: cache.icon,
+                color: cache.color
+            ) {
+                childItems.append(item)
+            }
+        }
+
+        var gradleChildren = gradleCaches.compactMap { cache in
+            makeCacheItem(
+                name: cache.name,
+                subpath: cache.subpath,
+                icon: "hammer.fill",
+                color: .purple
+            )
+        }
+        if !deferSizes {
+            gradleChildren.sort { $0.sizeBytes > $1.sizeBytes }
+        }
+        if !gradleChildren.isEmpty {
+            let totalBytes = gradleChildren.reduce(Int64(0)) { $0 + $1.sizeBytes }
+            let parentRule = CleanRule(
+                name: "Gradle",
+                pathDescription: "~/.gradle",
+                iconName: "cup.and.saucer.fill",
+                iconColor: .teal,
+                cleanType: .none,
+                note: "Gradle Build",
+                isCheckboxHidden: true
+            )
+            childItems.append(
+                CategoryItem(
+                    name: parentRule.name,
+                    pathDescription: parentRule.pathDescription,
+                    iconName: parentRule.iconName,
+                    iconColor: parentRule.iconColor,
+                    sizeBytes: totalBytes,
+                    sizeString: totalBytes > 0 ? formatBytes(totalBytes) : "",
+                    rule: parentRule,
+                    children: gradleChildren
+                )
+            )
+        }
+
+        childItems.append(contentsOf: scanChromeCaches(deferSizes: deferSizes))
 
         return childItems
     }
@@ -3720,7 +3781,6 @@ nonisolated struct FileSystemScanner: Sendable {
                 bytes = 0
             } else {
                 bytes = calculateDirectorySize(at: fullPath, isDirectory: true)
-                guard bytes > 1_000_000 else { return }
             }
 
             let displayPath = "~/Library/Application Support/Google/Chrome/\(relativePath)"

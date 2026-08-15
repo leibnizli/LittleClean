@@ -43,16 +43,6 @@ nonisolated struct CleanRule: Identifiable, @unchecked Sendable {
 
 nonisolated struct CleanConfig {
     static let defaultRules: [CleanRule] = [
-        CleanRule(
-            name: "Chrome Cache",
-            pathDescription: "~/Library/Application Support/Google/Chrome",
-            iconName: "globe",
-            iconColor: .orange,
-            note: "Chrome Cache",
-            isDynamicChromeCacheRule: true,
-            isCheckboxHidden: true,
-            scanMode: .safeCleanup
-        ),
         CleanRule(name: "System Logs", pathDescription: "~/Library/Logs", iconName: "doc.text.fill", iconColor: .blue, note: "System Logs"),
         CleanRule(name: "System Trash", pathDescription: "~/.Trash", iconName: "trash.fill", iconColor: .red, note: "System Trash"),
         CleanRule(name: "Xcode DerivedData", pathDescription: "~/Library/Developer/Xcode/DerivedData", iconName: "hammer.fill", iconColor: .purple, note: "Xcode DerivedData"),
