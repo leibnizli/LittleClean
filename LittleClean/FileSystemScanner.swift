@@ -3629,9 +3629,7 @@ nonisolated struct FileSystemScanner: Sendable {
             ("Bun Cache", ".bun/install/cache", "shippingbox.fill", .pink),
             ("node-gyp Cache", ".node-gyp", "hammer.fill", .gray),
             ("Deno Cache", ".deno/deps", "shippingbox.fill", .green),
-            ("Maven Repository", ".m2/repository", "shippingbox.fill", .indigo),
-            ("Cargo Registry Cache", ".cargo/registry", "shippingbox.fill", .orange),
-            ("Cargo Git Cache", ".cargo/git", "shippingbox.fill", .orange)
+            ("Maven Repository", ".m2/repository", "shippingbox.fill", .indigo)
         ]
         let gradleCaches: [(name: String, subpath: String)] = [
             ("Cache", ".gradle/caches"),
@@ -3639,6 +3637,10 @@ nonisolated struct FileSystemScanner: Sendable {
             ("Temporary Files", ".gradle/.tmp"),
             ("Daemon Logs", ".gradle/daemon"),
             ("Native Libraries", ".gradle/native")
+        ]
+        let cargoCaches: [(name: String, subpath: String)] = [
+            ("Registry Cache", ".cargo/registry"),
+            ("Git Cache", ".cargo/git")
         ]
 
         func makeCacheItem(
@@ -3693,26 +3695,27 @@ nonisolated struct FileSystemScanner: Sendable {
             }
         }
 
-        var gradleChildren = gradleCaches.compactMap { cache in
-            makeCacheItem(
-                name: cache.name,
-                subpath: cache.subpath,
-                icon: "hammer.fill",
-                color: .purple
-            )
-        }
-        if !deferSizes {
-            gradleChildren.sort { $0.sizeBytes > $1.sizeBytes }
-        }
-        if !gradleChildren.isEmpty {
-            let totalBytes = gradleChildren.reduce(Int64(0)) { $0 + $1.sizeBytes }
+        func appendGroup(
+            name: String,
+            path: String,
+            icon: String,
+            color: Color,
+            note: LocalizedStringKey,
+            children: [CategoryItem]
+        ) {
+            var children = children
+            guard !children.isEmpty else { return }
+            if !deferSizes {
+                children.sort { $0.sizeBytes > $1.sizeBytes }
+            }
+            let totalBytes = children.reduce(Int64(0)) { $0 + $1.sizeBytes }
             let parentRule = CleanRule(
-                name: "Gradle",
-                pathDescription: "~/.gradle",
-                iconName: "cup.and.saucer.fill",
-                iconColor: .teal,
+                name: name,
+                pathDescription: path,
+                iconName: icon,
+                iconColor: color,
                 cleanType: .none,
-                note: "Gradle Build",
+                note: note,
                 isCheckboxHidden: true
             )
             childItems.append(
@@ -3724,10 +3727,41 @@ nonisolated struct FileSystemScanner: Sendable {
                     sizeBytes: totalBytes,
                     sizeString: totalBytes > 0 ? formatBytes(totalBytes) : "",
                     rule: parentRule,
-                    children: gradleChildren
+                    children: children
                 )
             )
         }
+
+        appendGroup(
+            name: "Gradle",
+            path: "~/.gradle",
+            icon: "cup.and.saucer.fill",
+            color: .teal,
+            note: "Gradle Build",
+            children: gradleCaches.compactMap { cache in
+                makeCacheItem(
+                    name: cache.name,
+                    subpath: cache.subpath,
+                    icon: "hammer.fill",
+                    color: .purple
+                )
+            }
+        )
+        appendGroup(
+            name: "Cargo",
+            path: "~/.cargo",
+            icon: "shippingbox.fill",
+            color: .orange,
+            note: "Rust Packages",
+            children: cargoCaches.compactMap { cache in
+                makeCacheItem(
+                    name: cache.name,
+                    subpath: cache.subpath,
+                    icon: "shippingbox.fill",
+                    color: .orange
+                )
+            }
+        )
 
         childItems.append(contentsOf: scanChromeCaches(deferSizes: deferSizes))
 

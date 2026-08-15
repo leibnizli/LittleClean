@@ -819,6 +819,9 @@
         }
       }
     },
+    "Rust Packages" : {
+
+    },
     "Safe Cleanup" : {
       "localizations" : {
         "zh-Hans" : {
