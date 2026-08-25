@@ -34,7 +34,12 @@ final class ContentViewModel: ObservableObject {
         for session in [uninstallSession, safeCleanupSession, deepAnalysisSession] {
             session.objectWillChange
                 .sink { [weak self] _ in
-                    self?.objectWillChange.send()
+                    // Table may update session bindings (such as sortOrder) while SwiftUI
+                    // is evaluating the view. Forward on the next main-queue turn so the
+                    // parent does not publish recursively from inside that update pass.
+                    DispatchQueue.main.async { [weak self] in
+                        self?.objectWillChange.send()
+                    }
                 }
                 .store(in: &cancellables)
         }
@@ -59,8 +64,14 @@ final class ContentViewModel: ObservableObject {
 
     func selectScanMode(_ mode: ScanMode) {
         guard mode != scanMode else { return }
-        scanMode = mode
-        ensureLoaded(mode)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, mode != self.scanMode else { return }
+            self.scanMode = mode
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.scanMode == mode else { return }
+                self.ensureLoaded(mode)
+            }
+        }
     }
 
     func ensureLoaded(_ mode: ScanMode? = nil) {
@@ -700,19 +711,28 @@ final class ContentViewModel: ObservableObject {
 
     private func loadRealDiskSpace() {
         let homeURL = FileManager.default.homeDirectoryForCurrentUser
-        do {
-            let values = try homeURL.resourceValues(forKeys: [
-                .volumeTotalCapacityKey,
-                .volumeAvailableCapacityForImportantUsageKey
-            ])
-            if let total = values.volumeTotalCapacity,
-               let free = values.volumeAvailableCapacityForImportantUsage {
-                totalBytes = Int64(total)
-                freeBytes = Int64(free)
-                usedBytes = max(0, totalBytes - freeBytes)
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            do {
+                let values = try homeURL.resourceValues(forKeys: [
+                    .volumeTotalCapacityKey,
+                    .volumeAvailableCapacityForImportantUsageKey
+                ])
+                guard let total = values.volumeTotalCapacity,
+                      let free = values.volumeAvailableCapacityForImportantUsage else {
+                    return
+                }
+                let totalBytes = Int64(total)
+                let freeBytes = Int64(free)
+                let usedBytes = max(0, totalBytes - freeBytes)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.totalBytes = totalBytes
+                    self.freeBytes = freeBytes
+                    self.usedBytes = usedBytes
+                }
+            } catch {
+                print("Failed to load real disk space: \(error)")
             }
-        } catch {
-            print("Failed to load real disk space: \(error)")
         }
     }
 }
