@@ -67,10 +67,7 @@ final class ContentViewModel: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self, mode != self.scanMode else { return }
             self.scanMode = mode
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.scanMode == mode else { return }
-                self.ensureLoaded(mode)
-            }
+            self.ensureLoaded(mode)
         }
     }
 
