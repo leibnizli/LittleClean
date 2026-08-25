@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Security
 import SwiftUI
 
@@ -1987,26 +1988,84 @@ nonisolated struct FileSystemScanner: Sendable {
         return last
     }
 
+    // Capture stdout while the child is running so a full pipe cannot deadlock it.
+    // A hard timeout also prevents a stuck CoreSimulator service from blocking the scan.
+    private func runProcessCapture(
+        executable: String,
+        arguments: [String],
+        timeout: TimeInterval
+    ) -> Data? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        // The child has inherited the write descriptor; keeping the parent's copy open
+        // would prevent the reader from observing EOF after the child exits.
+        try? stdout.fileHandleForWriting.close()
+
+        let output = LockedBox<Data>(Data())
+        let outputFinished = DispatchSemaphore(value: 0)
+        let readHandle = stdout.fileHandleForReading
+        DispatchQueue.global(qos: .userInitiated).async {
+            output.with { $0 = readHandle.readDataToEndOfFile() }
+            outputFinished.signal()
+        }
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        guard !process.isRunning else {
+            process.terminate()
+            let terminateDeadline = Date().addingTimeInterval(1)
+            while process.isRunning, Date() < terminateDeadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if process.isRunning {
+                Darwin.kill(process.processIdentifier, SIGKILL)
+                let killDeadline = Date().addingTimeInterval(1)
+                while process.isRunning, Date() < killDeadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+            }
+            try? readHandle.close()
+            _ = outputFinished.wait(timeout: .now() + 1)
+            return nil
+        }
+
+        process.waitUntilExit()
+        guard outputFinished.wait(timeout: .now() + 2) == .success,
+              process.terminationStatus == 0 else {
+            try? readHandle.close()
+            return nil
+        }
+        return output.with { $0 }
+    }
+
     // Detect simulator devices whose runtime is no longer installed (unavailable)
     private func scanUnavailableSimulators(
         basePath: String,
         deferSizes: Bool = false
     ) -> [CategoryItem] {
         // Availability is not stored in device.plist; ask simctl via JSON output.
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        process.arguments = ["simctl", "list", "devices", "-j"]
-        let stdout = Pipe()
-        process.standardOutput = stdout
-        process.standardError = Pipe()
-        do {
-            try process.run()
-        } catch {
-            return [] // Xcode / simctl not installed on this machine
-        }
-        process.waitUntilExit()
-        guard process.terminationStatus == 0,
-              let data = try? stdout.fileHandleForReading.readToEnd(),
+        // Failure or timeout only omits this optional category; other rules still finish.
+        guard let data = runProcessCapture(
+            executable: "/usr/bin/xcrun",
+            arguments: ["simctl", "list", "devices", "-j"],
+            timeout: 15
+        ),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let devicesByRuntime = json["devices"] as? [String: [Any]] else {
             return []
