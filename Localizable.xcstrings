@@ -201,6 +201,16 @@
         }
       }
     },
+    "Cache directory" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缓存目录"
+          }
+        }
+      }
+    },
     "Cancel" : {
       "localizations" : {
         "zh-Hans" : {
@@ -722,6 +732,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "处理受保护文件时将要求输入管理员密码。"
+          }
+        }
+      }
+    },
+    "Python (pip)" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Python (pip)"
           }
         }
       }

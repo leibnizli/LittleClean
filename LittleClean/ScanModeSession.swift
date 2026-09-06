@@ -37,11 +37,21 @@ final class ScanModeSession: ObservableObject {
         } else {
             base = Self.flatFilteredLeaves(categories, query: trimmedSearch)
         }
-        var result = base.sorted(using: sortOrder)
-        for index in result.indices {
-            result[index].children?.sort(using: sortOrder)
-        }
+        var result = base
+        Self.sortRecursively(&result, using: sortOrder)
         return result
+    }
+
+    private static func sortRecursively(
+        _ items: inout [CategoryItem],
+        using comparators: [KeyPathComparator<CategoryItem>]
+    ) {
+        items.sort(using: comparators)
+        for index in items.indices {
+            if items[index].children != nil {
+                Self.sortRecursively(&items[index].children!, using: comparators)
+            }
+        }
     }
 
     var selectedTotalBytes: Int64 {

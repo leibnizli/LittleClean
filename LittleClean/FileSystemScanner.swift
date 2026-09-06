@@ -1775,6 +1775,15 @@ nonisolated struct FileSystemScanner: Sendable {
             emitTool(self.scanPipxTools(dirs: dirs))
         }
 
+        group.enter()
+        queue.async {
+            defer { group.leave() }
+            var localOwned = Set<String>()
+            let item = self.scanPipTools(dirs: dirs, ownedDirs: &localOwned)
+            ownedDirs.with { $0.formUnion(localOwned) }
+            emitTool(item)
+        }
+
         for entry in homeDirectoryEntries() {
             group.enter()
             queue.async {
@@ -4269,7 +4278,8 @@ nonisolated struct FileSystemScanner: Sendable {
             }
         }
 
-        return displayParent(name: "Node.js", label: "Node.js", icon: "shippingbox.fill", color: .green, children: installNodes)
+        let sortedNodes = installNodes.sorted { $0.sizeBytes > $1.sizeBytes }
+        return displayParent(name: "Node.js", label: "Node.js", icon: "shippingbox.fill", color: .green, children: sortedNodes)
     }
 
     // Full paths of the home-root entries the Home Directory section lists (non-system,
@@ -4691,6 +4701,310 @@ nonisolated struct FileSystemScanner: Sendable {
         )
     }
 
+    // Parse dist-info and egg-info metadata from a site-packages folder to discover installed pip packages.
+    private func sizedPipPackages(in sitePackages: String) -> [CategoryItem] {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: sitePackages) else { return [] }
+
+        var packages: [CategoryItem] = []
+        var seenNames = Set<String>()
+
+        for entry in entries {
+            let isDistInfo = entry.hasSuffix(".dist-info")
+            let isEggInfo = entry.hasSuffix(".egg-info")
+            guard isDistInfo || isEggInfo else { continue }
+
+            let infoDir = (sitePackages as NSString).appendingPathComponent(entry)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: infoDir, isDirectory: &isDir), isDir.boolValue else { continue }
+
+            let metaFile = isDistInfo
+                ? (infoDir as NSString).appendingPathComponent("METADATA")
+                : (infoDir as NSString).appendingPathComponent("PKG-INFO")
+
+            var rawName: String?
+            var version: String?
+
+            if let content = try? String(contentsOfFile: metaFile, encoding: .utf8) {
+                for rawLine in content.split(separator: "\n", maxSplits: 40) {
+                    let line = String(rawLine)
+                    if line.hasPrefix("Name: ") {
+                        rawName = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                    } else if line.hasPrefix("Version: ") {
+                        version = String(line.dropFirst(9)).trimmingCharacters(in: .whitespaces)
+                    }
+                    if rawName != nil && version != nil { break }
+                }
+            }
+
+            let baseNameWithoutExt: String
+            if isDistInfo {
+                baseNameWithoutExt = String(entry.dropLast(".dist-info".count))
+            } else {
+                baseNameWithoutExt = String(entry.dropLast(".egg-info".count))
+            }
+
+            if rawName == nil {
+                let parts = baseNameWithoutExt.components(separatedBy: "-")
+                rawName = parts.first
+                if version == nil && parts.count > 1 {
+                    version = parts.dropFirst().joined(separator: "-")
+                }
+            }
+
+            guard let pkgName = rawName, !pkgName.isEmpty else { continue }
+            if !seenNames.insert(pkgName.lowercased()).inserted { continue }
+
+            // Extract CLI command names from entry_points.txt if present
+            var cliCommands: [String] = []
+            let epFile = (infoDir as NSString).appendingPathComponent("entry_points.txt")
+            if let epContent = try? String(contentsOfFile: epFile, encoding: .utf8) {
+                var inConsoleScripts = false
+                for rawLine in epContent.split(separator: "\n") {
+                    let line = String(rawLine).trimmingCharacters(in: .whitespaces)
+                    if line.hasPrefix("[") && line.hasSuffix("]") {
+                        inConsoleScripts = (line == "[console_scripts]")
+                        continue
+                    }
+                    if inConsoleScripts && !line.isEmpty && !line.hasPrefix("#") {
+                        if let eqIndex = line.firstIndex(of: "=") {
+                            let cmd = String(line[..<eqIndex]).trimmingCharacters(in: .whitespaces)
+                            if !cmd.isEmpty {
+                                cliCommands.append(cmd)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Extract top-level package folder / module names
+            var topLevelNames = Set<String>()
+            let topLevelFile = (infoDir as NSString).appendingPathComponent("top_level.txt")
+            if let tlContent = try? String(contentsOfFile: topLevelFile, encoding: .utf8) {
+                for rawLine in tlContent.split(separator: "\n") {
+                    let name = String(rawLine).trimmingCharacters(in: .whitespaces)
+                    if !name.isEmpty && !name.hasPrefix(".") && !name.contains("/") {
+                        topLevelNames.insert(name)
+                    }
+                }
+            }
+
+            if topLevelNames.isEmpty {
+                let recordFile = (infoDir as NSString).appendingPathComponent("RECORD")
+                if let recordContent = try? String(contentsOfFile: recordFile, encoding: .utf8) {
+                    for rawLine in recordContent.split(separator: "\n") {
+                        let line = String(rawLine).trimmingCharacters(in: .whitespaces)
+                        if line.isEmpty || line.hasPrefix(entry) || line.hasPrefix("..") || line.hasPrefix("/") { continue }
+                        if let commaIdx = line.firstIndex(of: ",") {
+                            let relPath = String(line[..<commaIdx]).trimmingCharacters(in: .whitespaces)
+                            if relPath.hasPrefix("..") || relPath.hasPrefix("/") { continue }
+                            let firstComp = (relPath as NSString).pathComponents.first ?? ""
+                            if !firstComp.isEmpty
+                                && !firstComp.hasPrefix(".")
+                                && !firstComp.contains("/")
+                                && !firstComp.hasSuffix(".dist-info")
+                                && !firstComp.hasSuffix(".egg-info") {
+                                topLevelNames.insert(firstComp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if topLevelNames.isEmpty {
+                let normalized = pkgName.replacingOccurrences(of: "-", with: "_")
+                if !normalized.hasPrefix(".") && !normalized.contains("/") {
+                    topLevelNames.insert(normalized)
+                }
+            }
+
+            var totalSize: Int64 = calculateDirectorySize(at: infoDir, isDirectory: true)
+            var primaryFinderPath: String = infoDir
+
+            for mod in topLevelNames {
+                guard !mod.isEmpty && !mod.hasPrefix(".") && !mod.contains("/") && !mod.contains("\\") else { continue }
+                let modPath = (sitePackages as NSString).appendingPathComponent(mod)
+                guard modPath.hasPrefix(sitePackages + "/") else { continue }
+
+                var modIsDir: ObjCBool = false
+                if fm.fileExists(atPath: modPath, isDirectory: &modIsDir) {
+                    totalSize += calculateDirectorySize(at: modPath, isDirectory: modIsDir.boolValue)
+                    if primaryFinderPath == infoDir {
+                        primaryFinderPath = modPath
+                    }
+                } else {
+                    let pyFile = (sitePackages as NSString).appendingPathComponent("\(mod).py")
+                    if fm.fileExists(atPath: pyFile) {
+                        totalSize += calculateDirectorySize(at: pyFile, isDirectory: false)
+                        if primaryFinderPath == infoDir {
+                            primaryFinderPath = pyFile
+                        }
+                    }
+                }
+
+                let libsDir = (sitePackages as NSString).appendingPathComponent("\(mod).libs")
+                if libsDir.hasPrefix(sitePackages + "/") {
+                    var libsIsDir: ObjCBool = false
+                    if fm.fileExists(atPath: libsDir, isDirectory: &libsIsDir), libsIsDir.boolValue {
+                        totalSize += calculateDirectorySize(at: libsDir, isDirectory: true)
+                    }
+                }
+            }
+
+            var descParts: [String] = []
+            if let ver = version {
+                descParts.append("v\(ver)")
+            }
+            if !cliCommands.isEmpty {
+                let cmdStr = cliCommands.joined(separator: ", ")
+                descParts.append("CLI: \(cmdStr)")
+            }
+            let descKey: LocalizedStringKey? = descParts.isEmpty ? nil : LocalizedStringKey(descParts.joined(separator: " • "))
+
+            let displayLabel: String
+            if !cliCommands.isEmpty && !cliCommands.contains(pkgName) {
+                displayLabel = "\(pkgName) (\(cliCommands.joined(separator: ", ")))"
+            } else {
+                displayLabel = pkgName
+            }
+
+            packages.append(
+                displayItem(
+                    name: pkgName,
+                    label: displayLabel,
+                    icon: "circle.fill",
+                    color: .secondary,
+                    sizeBytes: totalSize,
+                    finderPath: primaryFinderPath,
+                    description: descKey
+                )
+            )
+        }
+
+        return packages.sorted { $0.sizeBytes > $1.sizeBytes }
+    }
+
+    // Enumerate Python installations (Homebrew, User, pyenv, Framework, active PATH) and list global pip packages.
+    private func scanPipTools(dirs: [String], ownedDirs: inout Set<String>) -> CategoryItem? {
+        let home = NSHomeDirectory()
+        let fm = FileManager.default
+        var envs: [(label: String, sitePackages: String, binDir: String?)] = []
+        var seenSitePackages = Set<String>()
+
+        func addSitePackages(label: String, path: String, binDir: String?) {
+            let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            guard fm.fileExists(atPath: resolved) else { return }
+            if seenSitePackages.insert(resolved).inserted {
+                envs.append((label, resolved, binDir))
+            }
+        }
+
+        // 1. Homebrew Python (e.g. /opt/homebrew/lib/python3.x/site-packages, /usr/local/lib/python3.x/site-packages)
+        let brewPrefixes = ["/opt/homebrew", "/usr/local"]
+        for prefix in brewPrefixes {
+            let libDir = (prefix as NSString).appendingPathComponent("lib")
+            if let entries = try? fm.contentsOfDirectory(atPath: libDir) {
+                for entry in entries.sorted() where entry.hasPrefix("python3.") {
+                    let sp = (libDir as NSString).appendingPathComponent("\(entry)/site-packages")
+                    let ver = String(entry.dropFirst("python".count))
+                    let bin = (prefix as NSString).appendingPathComponent("bin")
+                    addSitePackages(label: "Homebrew Python \(ver)", path: sp, binDir: bin)
+                }
+            }
+        }
+
+        // 2. User Python (e.g. ~/Library/Python/3.x/lib/python/site-packages)
+        let userPythonDir = (home as NSString).appendingPathComponent("Library/Python")
+        if let entries = try? fm.contentsOfDirectory(atPath: userPythonDir) {
+            for entry in entries.sorted() where entry.hasPrefix("3.") {
+                let sp = (userPythonDir as NSString).appendingPathComponent("\(entry)/lib/python/site-packages")
+                let bin = (userPythonDir as NSString).appendingPathComponent("\(entry)/bin")
+                addSitePackages(label: "User Python \(entry)", path: sp, binDir: bin)
+            }
+        }
+
+        // 3. Pyenv Python (e.g. ~/.pyenv/versions/*/lib/python3.*/site-packages)
+        let pyenvVersionsDir = (home as NSString).appendingPathComponent(".pyenv/versions")
+        if let versions = try? fm.contentsOfDirectory(atPath: pyenvVersionsDir) {
+            for ver in versions.sorted() where !ver.hasPrefix(".") {
+                let verDir = (pyenvVersionsDir as NSString).appendingPathComponent(ver)
+                let libDir = (verDir as NSString).appendingPathComponent("lib")
+                if let pyDirs = try? fm.contentsOfDirectory(atPath: libDir) {
+                    for pyd in pyDirs where pyd.hasPrefix("python3.") {
+                        let sp = (libDir as NSString).appendingPathComponent("\(pyd)/site-packages")
+                        let bin = (verDir as NSString).appendingPathComponent("bin")
+                        addSitePackages(label: "pyenv \(ver)", path: sp, binDir: bin)
+                    }
+                }
+            }
+        }
+
+        // 4. Framework Python (/Library/Frameworks/Python.framework/Versions/3.*/lib/python3.*/site-packages)
+        let frameworkVersionsDir = "/Library/Frameworks/Python.framework/Versions"
+        if let versions = try? fm.contentsOfDirectory(atPath: frameworkVersionsDir) {
+            for ver in versions.sorted() where ver.hasPrefix("3.") {
+                let verDir = (frameworkVersionsDir as NSString).appendingPathComponent(ver)
+                let libDir = (verDir as NSString).appendingPathComponent("lib")
+                if let pyDirs = try? fm.contentsOfDirectory(atPath: libDir) {
+                    for pyd in pyDirs where pyd.hasPrefix("python3.") {
+                        let sp = (libDir as NSString).appendingPathComponent("\(pyd)/site-packages")
+                        let bin = (verDir as NSString).appendingPathComponent("bin")
+                        addSitePackages(label: "Framework Python \(ver)", path: sp, binDir: bin)
+                    }
+                }
+            }
+        }
+
+        // 5. Active Python in PATH (fallback for any site-packages not covered above)
+        if let pyPath = locateBinary("python3", in: dirs) ?? locateBinary("python", in: dirs) {
+            let script = "import sys, site; print(f'{sys.version_info.major}.{sys.version_info.minor}'); print('\\n'.join(site.getsitepackages()))"
+            if let out = runCommandCapture(pyPath, ["-c", script]) {
+                let lines = trimCommandLines(out)
+                if let ver = lines.first {
+                    for sp in lines.dropFirst() {
+                        addSitePackages(label: "PATH Python \(ver)", path: sp, binDir: (pyPath as NSString).deletingLastPathComponent)
+                    }
+                }
+            }
+        }
+
+        guard !envs.isEmpty else { return nil }
+
+        var envNodes: [CategoryItem] = []
+        for env in envs {
+            let pkgs = sizedPipPackages(in: env.sitePackages)
+            if let bin = env.binDir, dirs.contains(bin) {
+                if !bin.hasPrefix("/opt/homebrew") && !bin.hasPrefix("/usr/local") {
+                    ownedDirs.insert(bin)
+                }
+            }
+            guard !pkgs.isEmpty else { continue }
+            let displayLabel = "\(env.label)  (\(pkgs.count))"
+            envNodes.append(
+                displayParent(
+                    name: env.label,
+                    label: displayLabel,
+                    icon: "shippingbox.fill",
+                    color: .yellow,
+                    children: pkgs,
+                    finderPath: env.sitePackages
+                )
+            )
+        }
+
+        guard !envNodes.isEmpty else { return nil }
+
+        let sortedEnvs = envNodes.sorted { $0.sizeBytes > $1.sizeBytes }
+
+        return displayParent(
+            name: "Python (pip)",
+            label: "Python (pip)",
+            icon: "shippingbox.fill",
+            color: .yellow,
+            children: sortedEnvs
+        )
+    }
+
     private func scanOtherPathTools(dirs: [String], ownedDirs: Set<String>) -> CategoryItem? {
         let home = NSHomeDirectory()
         var otherNodes: [CategoryItem] = []
@@ -4767,6 +5081,11 @@ nonisolated struct FileSystemScanner: Sendable {
         if let item = go.item { toolNodes.append(item) }
 
         if let pipx = scanPipxTools(dirs: dirs) { toolNodes.append(pipx) }
+        var pipOwned = Set<String>()
+        if let pip = scanPipTools(dirs: dirs, ownedDirs: &pipOwned) {
+            ownedDirs.formUnion(pipOwned)
+            toolNodes.append(pip)
+        }
         if let other = scanOtherPathTools(dirs: dirs, ownedDirs: ownedDirs) {
             toolNodes.append(other)
         }
@@ -4854,7 +5173,27 @@ nonisolated struct FileSystemScanner: Sendable {
             let kids = scanLocalChildren(in: fullPath)
             return kids.isEmpty ? nil : kids
         }
+        if name == ".cache" {
+            let kids = scanCacheChildren(in: fullPath)
+            return kids.isEmpty ? nil : kids
+        }
         return nil
+    }
+
+    // Enumerate direct subdirectories of ~/.cache to make individual tool and model caches expandable and searchable.
+    private func scanCacheChildren(in root: String) -> [CategoryItem] {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: root) else { return [] }
+        var nodes: [CategoryItem] = []
+        for entry in entries {
+            if entry.hasPrefix(".") { continue }
+            let entryPath = (root as NSString).appendingPathComponent(entry)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: entryPath, isDirectory: &isDir) else { continue }
+            let size = calculateDirectorySize(at: entryPath, isDirectory: isDir.boolValue)
+            nodes.append(leaf(entry, size, finderPath: entryPath, description: LocalizedStringKey("Cache directory")))
+        }
+        return nodes.sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
     // Each subdirectory of a venv root is one virtual environment. pyvenv.cfg is preferred;
