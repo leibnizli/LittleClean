@@ -1,6 +1,6 @@
 # LittleClean
 
-[English](README.md) | 中文文档
+[Official Website](https://arayofsunshine.dev/littleclean) | [English](README.md) | 中文文档
 
 LittleClean 是一款强大而智能的 macOS 系统清理及开发者工具管理软件。它能帮助您轻松彻底地卸载应用程序、安全地清理缓存与日志，并移除残留文件以释放宝贵的磁盘空间，同时提供对已安装的开发环境及全局包的深度透视功能。
 <img width="336" alt="Image" src="https://github.com/user-attachments/assets/4eb9d387-71de-4ddc-bf1e-fbeb42739c92" />
@@ -9,7 +9,7 @@ LittleClean 是一款强大而智能的 macOS 系统清理及开发者工具管�
 
 ## 安装与运行
 
-您可以从 [Releases](https://github.com/leibnizli/LittleClean/releases) 页面下载最新编译好的版本。（最低支持 macOS 14）
+您可以从 [Official Website](https://arayofsunshine.dev/littleclean) 或 [Releases](https://github.com/leibnizli/LittleClean/releases) 页面下载最新编译好的版本。（最低支持 macOS 14）
 
 或者，您也可以克隆仓库后使用 Xcode 编译并运行。
 

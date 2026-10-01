@@ -1,6 +1,6 @@
 # LittleClean
 
-[中文文档](README_zh.md) | English
+[Official Website](https://arayofsunshine.dev/littleclean) | [中文文档](README_zh.md) | English
 
 LittleClean is a powerful and intelligent macOS cleaner and developer tool manager. It helps you reclaim valuable disk space by completely uninstalling unwanted applications and safely removing caches, logs, and leftovers, while also providing deep visibility into installed development tools and environments.
 
@@ -10,7 +10,7 @@ LittleClean is a powerful and intelligent macOS cleaner and developer tool manag
 
 ## Installation
 
-You can download the latest pre-compiled version from the [Releases](https://github.com/leibnizli/LittleClean/releases) page. (Requires macOS 14 or later)
+You can download the latest pre-compiled version from the [Official Website](https://arayofsunshine.dev/littleclean) or the [Releases](https://github.com/leibnizli/LittleClean/releases) page. (Requires macOS 14 or later)
 
 Alternatively, you can clone the repository and build via Xcode.
 
