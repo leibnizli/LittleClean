@@ -4701,6 +4701,38 @@ nonisolated struct FileSystemScanner: Sendable {
         )
     }
 
+    // RECORD is CSV: quoted paths can contain commas, escaped quotes, and newlines.
+    private func pipRecordPaths(_ content: String) -> [String] {
+        var paths: [String] = []
+        var path = ""
+        var inQuotes = false
+        var isPathField = true
+        var index = content.startIndex
+        while index < content.endIndex {
+            let character = content[index]
+            let next = content.index(after: index)
+            if character == "\"" {
+                if inQuotes && next < content.endIndex && content[next] == "\"" {
+                    if isPathField { path.append("\"") }
+                    index = content.index(after: next)
+                    continue
+                }
+                inQuotes.toggle()
+            } else if !inQuotes && character == "," {
+                isPathField = false
+            } else if !inQuotes && character.isNewline {
+                if !isPathField && !path.isEmpty { paths.append(path) }
+                path = ""
+                isPathField = true
+            } else if isPathField {
+                path.append(character)
+            }
+            index = next
+        }
+        if !inQuotes && !isPathField && !path.isEmpty { paths.append(path) }
+        return paths
+    }
+
     // Parse dist-info and egg-info metadata from a site-packages folder to discover installed pip packages.
     private func sizedPipPackages(in sitePackages: String) -> [CategoryItem] {
         let fm = FileManager.default
@@ -4709,7 +4741,7 @@ nonisolated struct FileSystemScanner: Sendable {
         var packages: [CategoryItem] = []
         var seenNames = Set<String>()
 
-        for entry in entries {
+        for entry in entries.sorted() {
             let isDistInfo = entry.hasSuffix(".dist-info")
             let isEggInfo = entry.hasSuffix(".egg-info")
             guard isDistInfo || isEggInfo else { continue }
@@ -4726,7 +4758,7 @@ nonisolated struct FileSystemScanner: Sendable {
             var version: String?
 
             if let content = try? String(contentsOfFile: metaFile, encoding: .utf8) {
-                for rawLine in content.split(separator: "\n", maxSplits: 40) {
+                for rawLine in content.split(maxSplits: 40, whereSeparator: \.isNewline) {
                     let line = String(rawLine)
                     if line.hasPrefix("Name: ") {
                         rawName = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
@@ -4760,7 +4792,7 @@ nonisolated struct FileSystemScanner: Sendable {
             let epFile = (infoDir as NSString).appendingPathComponent("entry_points.txt")
             if let epContent = try? String(contentsOfFile: epFile, encoding: .utf8) {
                 var inConsoleScripts = false
-                for rawLine in epContent.split(separator: "\n") {
+                for rawLine in epContent.split(whereSeparator: \.isNewline) {
                     let line = String(rawLine).trimmingCharacters(in: .whitespaces)
                     if line.hasPrefix("[") && line.hasSuffix("]") {
                         inConsoleScripts = (line == "[console_scripts]")
@@ -4777,77 +4809,67 @@ nonisolated struct FileSystemScanner: Sendable {
                 }
             }
 
-            // Extract top-level package folder / module names
-            var topLevelNames = Set<String>()
-            let topLevelFile = (infoDir as NSString).appendingPathComponent("top_level.txt")
-            if let tlContent = try? String(contentsOfFile: topLevelFile, encoding: .utf8) {
-                for rawLine in tlContent.split(separator: "\n") {
-                    let name = String(rawLine).trimmingCharacters(in: .whitespaces)
-                    if !name.isEmpty && !name.hasPrefix(".") && !name.contains("/") {
-                        topLevelNames.insert(name)
-                    }
-                }
-            }
+            var totalSize = calculateDirectorySize(at: infoDir, isDirectory: true)
+            var primaryFinderPath = infoDir
+            let siteRoot = URL(fileURLWithPath: sitePackages).standardizedFileURL.path
+            let sitePrefix = siteRoot + "/"
+            let metadataPath = URL(fileURLWithPath: infoDir).standardizedFileURL.path
+            var countedPaths = Set<String>()
+            let recordFile = (infoDir as NSString).appendingPathComponent("RECORD")
 
-            if topLevelNames.isEmpty {
-                let recordFile = (infoDir as NSString).appendingPathComponent("RECORD")
-                if let recordContent = try? String(contentsOfFile: recordFile, encoding: .utf8) {
-                    for rawLine in recordContent.split(separator: "\n") {
-                        let line = String(rawLine).trimmingCharacters(in: .whitespaces)
-                        if line.isEmpty || line.hasPrefix(entry) || line.hasPrefix("..") || line.hasPrefix("/") { continue }
-                        if let commaIdx = line.firstIndex(of: ",") {
-                            let relPath = String(line[..<commaIdx]).trimmingCharacters(in: .whitespaces)
-                            if relPath.hasPrefix("..") || relPath.hasPrefix("/") { continue }
-                            let firstComp = (relPath as NSString).pathComponents.first ?? ""
-                            if !firstComp.isEmpty
-                                && !firstComp.hasPrefix(".")
-                                && !firstComp.contains("/")
-                                && !firstComp.hasSuffix(".dist-info")
-                                && !firstComp.hasSuffix(".egg-info") {
-                                topLevelNames.insert(firstComp)
-                            }
-                        }
-                    }
-                }
-            }
-
-            if topLevelNames.isEmpty {
-                let normalized = pkgName.replacingOccurrences(of: "-", with: "_")
-                if !normalized.hasPrefix(".") && !normalized.contains("/") {
-                    topLevelNames.insert(normalized)
-                }
-            }
-
-            var totalSize: Int64 = calculateDirectorySize(at: infoDir, isDirectory: true)
-            var primaryFinderPath: String = infoDir
-
-            for mod in topLevelNames {
-                guard !mod.isEmpty && !mod.hasPrefix(".") && !mod.contains("/") && !mod.contains("\\") else { continue }
-                let modPath = (sitePackages as NSString).appendingPathComponent(mod)
-                guard modPath.hasPrefix(sitePackages + "/") else { continue }
-
-                var modIsDir: ObjCBool = false
-                if fm.fileExists(atPath: modPath, isDirectory: &modIsDir) {
-                    totalSize += calculateDirectorySize(at: modPath, isDirectory: modIsDir.boolValue)
+            if let record = try? String(contentsOfFile: recordFile, encoding: .utf8) {
+                // Count only the files owned by this distribution, including native extensions
+                // and bundled libraries. Never expand a shared namespace directory here.
+                for recordedPath in pipRecordPaths(record).sorted() {
+                    let path = (recordedPath as NSString).isAbsolutePath
+                        ? recordedPath
+                        : (siteRoot as NSString).appendingPathComponent(recordedPath)
+                    let filePath = URL(fileURLWithPath: path).standardizedFileURL.path
+                    // Keep the scan within site-packages; scripts outside it are PATH tools.
+                    guard filePath.hasPrefix(sitePrefix),
+                          filePath != metadataPath,
+                          !filePath.hasPrefix(metadataPath + "/"),
+                          countedPaths.insert(filePath).inserted else { continue }
+                    var isDirectory: ObjCBool = false
+                    guard fm.fileExists(atPath: filePath, isDirectory: &isDirectory),
+                          !isDirectory.boolValue else { continue }
+                    totalSize += calculateDirectorySize(at: filePath, isDirectory: false)
                     if primaryFinderPath == infoDir {
-                        primaryFinderPath = modPath
-                    }
-                } else {
-                    let pyFile = (sitePackages as NSString).appendingPathComponent("\(mod).py")
-                    if fm.fileExists(atPath: pyFile) {
-                        totalSize += calculateDirectorySize(at: pyFile, isDirectory: false)
-                        if primaryFinderPath == infoDir {
-                            primaryFinderPath = pyFile
-                        }
+                        let relativePath = String(filePath.dropFirst(sitePrefix.count))
+                        let topLevel = (relativePath as NSString).pathComponents.first ?? relativePath
+                        primaryFinderPath = (siteRoot as NSString).appendingPathComponent(topLevel)
                     }
                 }
-
-                let libsDir = (sitePackages as NSString).appendingPathComponent("\(mod).libs")
-                if libsDir.hasPrefix(sitePackages + "/") {
-                    var libsIsDir: ObjCBool = false
-                    if fm.fileExists(atPath: libsDir, isDirectory: &libsIsDir), libsIsDir.boolValue {
-                        totalSize += calculateDirectorySize(at: libsDir, isDirectory: true)
+            } else {
+                // Legacy installs without RECORD can only be estimated from their import names.
+                var topLevelNames = Set<String>()
+                let topLevelFile = (infoDir as NSString).appendingPathComponent("top_level.txt")
+                if let content = try? String(contentsOfFile: topLevelFile, encoding: .utf8) {
+                    for line in content.split(whereSeparator: \.isNewline) {
+                        let name = String(line).trimmingCharacters(in: .whitespaces)
+                        if !name.isEmpty { topLevelNames.insert(name) }
                     }
+                }
+                if topLevelNames.isEmpty {
+                    topLevelNames.insert(pkgName.replacingOccurrences(of: "-", with: "_"))
+                }
+                var candidates = Set<String>()
+                for name in topLevelNames {
+                    guard !name.isEmpty && !name.hasPrefix("."),
+                          !name.contains("/"), !name.contains("\\") else { continue }
+                    candidates.formUnion([name, "\(name).py", "\(name).libs"])
+                    for entry in entries where entry.hasPrefix(name + ".") && entry.hasSuffix(".so") {
+                        candidates.insert(entry)
+                    }
+                }
+                for candidate in candidates.sorted() {
+                    let path = (siteRoot as NSString).appendingPathComponent(candidate)
+                    guard path != metadataPath,
+                          countedPaths.insert(path).inserted else { continue }
+                    var isDirectory: ObjCBool = false
+                    guard fm.fileExists(atPath: path, isDirectory: &isDirectory) else { continue }
+                    totalSize += calculateDirectorySize(at: path, isDirectory: isDirectory.boolValue)
+                    if primaryFinderPath == infoDir { primaryFinderPath = path }
                 }
             }
 
@@ -4884,7 +4906,7 @@ nonisolated struct FileSystemScanner: Sendable {
         return packages.sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
-    // Enumerate Python installations (Homebrew, User, pyenv, Framework, active PATH) and list global pip packages.
+    // Enumerate global pip packages. Versions stored inside ~/.pyenv are expanded in Home Directory.
     private func scanPipTools(dirs: [String], ownedDirs: inout Set<String>) -> CategoryItem? {
         let home = NSHomeDirectory()
         let fm = FileManager.default
@@ -4923,23 +4945,19 @@ nonisolated struct FileSystemScanner: Sendable {
             }
         }
 
-        // 3. Pyenv Python (e.g. ~/.pyenv/versions/*/lib/python3.*/site-packages)
-        let pyenvVersionsDir = (home as NSString).appendingPathComponent(".pyenv/versions")
-        if let versions = try? fm.contentsOfDirectory(atPath: pyenvVersionsDir) {
-            for ver in versions.sorted() where !ver.hasPrefix(".") {
-                let verDir = (pyenvVersionsDir as NSString).appendingPathComponent(ver)
-                let libDir = (verDir as NSString).appendingPathComponent("lib")
-                if let pyDirs = try? fm.contentsOfDirectory(atPath: libDir) {
-                    for pyd in pyDirs where pyd.hasPrefix("python3.") {
-                        let sp = (libDir as NSString).appendingPathComponent("\(pyd)/site-packages")
-                        let bin = (verDir as NSString).appendingPathComponent("bin")
-                        addSitePackages(label: "pyenv \(ver)", path: sp, binDir: bin)
-                    }
-                }
-            }
+        // Pyenv versions linked outside ~/.pyenv are not included in the home entry's size.
+        let pyenvRoot = (home as NSString).appendingPathComponent(".pyenv")
+        let resolvedPyenvRoot = URL(fileURLWithPath: pyenvRoot).resolvingSymlinksInPath().path
+        for environment in pyenvSitePackages(in: pyenvRoot) {
+            guard !environment.path.hasPrefix(resolvedPyenvRoot + "/") else { continue }
+            addSitePackages(
+                label: "pyenv \(environment.version)",
+                path: environment.path,
+                binDir: (pyenvRoot as NSString).appendingPathComponent("versions/\(environment.version)/bin")
+            )
         }
 
-        // 4. Framework Python (/Library/Frameworks/Python.framework/Versions/3.*/lib/python3.*/site-packages)
+        // 3. Framework Python (/Library/Frameworks/Python.framework/Versions/3.*/lib/python3.*/site-packages)
         let frameworkVersionsDir = "/Library/Frameworks/Python.framework/Versions"
         if let versions = try? fm.contentsOfDirectory(atPath: frameworkVersionsDir) {
             for ver in versions.sorted() where ver.hasPrefix("3.") {
@@ -4955,7 +4973,7 @@ nonisolated struct FileSystemScanner: Sendable {
             }
         }
 
-        // 5. Active Python in PATH (fallback for any site-packages not covered above)
+        // 4. Active Python in PATH (fallback for any site-packages not covered above)
         if let pyPath = locateBinary("python3", in: dirs) ?? locateBinary("python", in: dirs) {
             let script = "import sys, site; print(f'{sys.version_info.major}.{sys.version_info.minor}'); print('\\n'.join(site.getsitepackages()))"
             if let out = runCommandCapture(pyPath, ["-c", script]) {
@@ -5157,7 +5175,7 @@ nonisolated struct FileSystemScanner: Sendable {
     }
 
     // For known tool-environment roots directly under ~, return expandable children
-    // (individual venvs / conda envs / pipx+uv under ~/.local). Nil keeps the entry flat.
+    // (venvs / conda envs / pyenv packages / pipx+uv under ~/.local). Nil keeps the entry flat.
     private func scanHomeEntryChildren(for fullPath: String, parentSize: Int64) -> [CategoryItem]? {
         let name = (fullPath as NSString).lastPathComponent.lowercased()
         if [".virtualenvs", ".venvs", ".envs", "venvs"].contains(name) {
@@ -5173,11 +5191,54 @@ nonisolated struct FileSystemScanner: Sendable {
             let kids = scanLocalChildren(in: fullPath)
             return kids.isEmpty ? nil : kids
         }
+        if name == ".pyenv" {
+            let kids = scanPyenvChildren(in: fullPath)
+            return kids.isEmpty ? nil : kids
+        }
         if name == ".cache" {
             let kids = scanCacheChildren(in: fullPath)
             return kids.isEmpty ? nil : kids
         }
         return nil
+    }
+
+    private func pyenvSitePackages(in root: String) -> [(version: String, path: String)] {
+        let fm = FileManager.default
+        let versionsDir = (root as NSString).appendingPathComponent("versions")
+        guard let versions = try? fm.contentsOfDirectory(atPath: versionsDir) else { return [] }
+        var seenSitePackages = Set<String>()
+        var environments: [(version: String, path: String)] = []
+        for version in versions.sorted() where !version.hasPrefix(".") {
+            let libDir = (versionsDir as NSString).appendingPathComponent("\(version)/lib")
+            guard let pythonDirs = try? fm.contentsOfDirectory(atPath: libDir) else { continue }
+            for pythonDir in pythonDirs.sorted() where pythonDir.hasPrefix("python3.") {
+                let path = (libDir as NSString).appendingPathComponent("\(pythonDir)/site-packages")
+                let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+                guard seenSitePackages.insert(resolved).inserted else { continue }
+                environments.append((version, resolved))
+            }
+        }
+        return environments
+    }
+
+    // Keep pyenv package details beneath the home entry that already accounts for their bytes.
+    private func scanPyenvChildren(in root: String) -> [CategoryItem] {
+        let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+        var nodes: [CategoryItem] = []
+        for environment in pyenvSitePackages(in: root) {
+            guard environment.path.hasPrefix(resolvedRoot + "/") else { continue }
+            let packages = sizedPipPackages(in: environment.path)
+            guard !packages.isEmpty else { continue }
+            nodes.append(displayParent(
+                name: "pyenv \(environment.version)",
+                label: "pyenv \(environment.version)  (\(packages.count))",
+                icon: "shippingbox.fill",
+                color: .yellow,
+                children: packages,
+                finderPath: environment.path
+            ))
+        }
+        return nodes.sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
     // Enumerate direct subdirectories of ~/.cache to make individual tool and model caches expandable and searchable.

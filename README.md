@@ -44,7 +44,7 @@ Read-only mode for complete visibility into development environments and disk us
 - **Node.js:** Exhaustively scans for Node.js installations across all major version managers (`nvm`, `fnm`, `volta`, `asdf`, `nodenv`, `n`, Homebrew, `/usr/local`, and active PATH) to find global packages.
 - **Global Package Managers:** View global packages and their sizes for Python (`pip`), `npm`, `pnpm`, `Yarn`, `Cargo` (Rust), Ruby Gems, and Go.
 - **Other PATH Tools:** List additional non-system binaries found on your PATH.
-- **Home Directory Overview:** Enumerate non-system items under `~`. `~/.cache` (tool and ML model caches), Python venv roots (`~/.virtualenvs` and similar), conda installs (`~/miniconda3` and similar), and `~/.local` (Pipx and uv tools) are expandable inline.
+- **Home Directory Overview:** Enumerate non-system items under `~`. `~/.cache` (tool and ML model caches), `~/.pyenv` (Python versions and their pip packages), Python venv roots (`~/.virtualenvs` and similar), conda installs (`~/miniconda3` and similar), and `~/.local` (Pipx and uv tools) are expandable inline.
 
 ### Search, Navigation & More
 - **Real-time Search:** Instantly filter through thousands of caches, tools, and leftovers.

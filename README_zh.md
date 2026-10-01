@@ -43,7 +43,7 @@ LittleClean 能够对占据磁盘空间的无用文件进行分类并安全清�
 - **Node.js:** 全面扫描 Node.js 安装情况，支持所有主流版本管理器（`nvm`、`fnm`、`volta`、`asdf`、`nodenv`、`n`、Homebrew、`/usr/local` 及环境变量 PATH），精准定位全局包。
 - **全局包管理器:** 查看 Python (`pip`)、`npm`、`pnpm`、`Yarn`、`Cargo`（Rust）、Ruby Gems、Go 的全局包及占用空间。
 - **其他 PATH 工具:** 列出 PATH 中其余非系统二进制工具。
-- **用户目录概览:** 枚举 `~` 下的非系统项。`~/.cache`（各类开发工具与 AI 模型缓存）、Python venv 根目录（`~/.virtualenvs` 等）、conda 安装（`~/miniconda3` 等）以及 `~/.local`（Pipx 与 uv 工具）可展开查看明细。
+- **用户目录概览:** 枚举 `~` 下的非系统项。`~/.cache`（各类开发工具与 AI 模型缓存）、`~/.pyenv`（Python 版本及其 pip 包）、Python venv 根目录（`~/.virtualenvs` 等）、conda 安装（`~/miniconda3` 等）以及 `~/.local`（Pipx 与 uv 工具）可展开查看明细。
 
 ### 搜索、导航与更多
 - **实时搜索:** 瞬间过滤出你想要的缓存、工具或残留项。
